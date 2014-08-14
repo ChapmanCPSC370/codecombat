@@ -58,8 +58,8 @@ module.exports = class ThangsTabView extends CocoView
     'delete, del, backspace': 'deleteSelectedExtantThang'
     'left': -> @moveAddThangSelection -1
     'right': -> @moveAddThangSelection 1
-    'ctrl+z': 'undo'
-    'ctrl+shift+z': 'redo'
+    'ctrl+z, ⌘+z': 'undo'
+    'ctrl+shift+z, ⌘+shift+z': 'redo'
 
   constructor: (options) ->
     super options
@@ -106,6 +106,11 @@ module.exports = class ThangsTabView extends CocoView
     else
       $('#thangs-list').height(oldHeight - thangsHeaderHeight - 80)
 
+  undo: (e) ->
+    if not @editThangView then @thangsTreema.undo() else @editThangView.undo()
+
+  redo: (e) ->
+    if not @editThangView then @thangsTreema.redo() else @editThangView.redo()
 
   afterRender: ->
     super()
@@ -116,7 +121,7 @@ module.exports = class ThangsTabView extends CocoView
     $(window).resize @onWindowResize
     @addThangsView = @insertSubView new AddThangsView world: @world, supermodel: @supermodel
     @buildInterface() # refactor to not have this trigger when this view re-renders?
-    if @thangsTreema.data.length 
+    if @thangsTreema.data.length
       @$el.find('#canvas-overlay').css('display', 'none')
 
   onFilterExtantThangs: (e) ->
@@ -157,6 +162,8 @@ module.exports = class ThangsTabView extends CocoView
     thangsHeaderHeight = $('#thangs-header').height()
     oldHeight = $('#thangs-list').height()
     $('#thangs-list').height(oldHeight - thangsHeaderHeight)
+    if data.thangs.length
+      @$el.find('#randomize-button').hide()
 
   initSurface: ->
     surfaceCanvas = $('canvas#surface', @$el)
@@ -235,7 +242,6 @@ module.exports = class ThangsTabView extends CocoView
       @addThang @addThangType, thang.pos, true
     @batchInsert()
     @selectAddThangType null
-    @$el.find('#canvas-overlay').css('display', 'none')
 
 
   # TODO: figure out a good way to have all Surface clicks and Treema clicks just proxy in one direction, so we can maintain only one way of handling selection and deletion
@@ -410,6 +416,7 @@ module.exports = class ThangsTabView extends CocoView
     @thangsBatch = []
 
   addThang: (thangType, pos, batchInsert=false) ->
+    @$el.find('#randomize-button').hide()
     if batchInsert
       thangID = "Random #{thangType.get('name')} #{@thangsBatch.length}"
     else
@@ -434,7 +441,7 @@ module.exports = class ThangsTabView extends CocoView
     else  # Mediator event
       window.thangsTreema = @thangsTreema
       thangData = @thangsTreema.get "id=#{e.thangID}"
-    @editThangView = new LevelThangEditView thangData: thangData, supermodel: @supermodel, level: @level, world: @world
+    @editThangView = new LevelThangEditView thangData: thangData, level: @level, world: @world
     @insertSubView @editThangView
     @$el.find('.thangs-column').hide()
     Backbone.Mediator.publish 'level:view-switched', e
@@ -477,14 +484,18 @@ module.exports = class ThangsTabView extends CocoView
     $('#add-thangs-column').toggle()
     @onWindowResize e
 
-  undo: (e) ->
-    if not @editThangView then @thangsTreema.undo() else @editThangView.undo()
-
-  redo: (e) ->
-    if not @editThangView then @thangsTreema.redo() else @editThangView.redo()
-
 class ThangsNode extends TreemaNode.nodeMap.array
   valueClass: 'treema-array-replacement'
+  nodeDescription: 'Thang'
+
+  getTrackedActionDescription: (trackedAction) ->
+    trackedActionDescription = super(trackedAction)
+    if trackedActionDescription is 'Edit ' + @nodeDescription
+      path = trackedAction.path.split '/'
+      if path[path.length-1] is 'pos'
+        trackedActionDescription = 'Move Thang'
+    trackedActionDescription
+
   getChildren: ->
     children = super(arguments...)
     # TODO: add some filtering to only work with certain types of units at a time
@@ -500,7 +511,7 @@ class ThangNode extends TreemaObjectNode
     s = "#{@data.thangType}"
     if isObjectID s
       unless name = ThangNode.thangNameMap[s]
-        thangType = _.find @settings.supermodel.getModels(ThangType), (m) -> m.get('original') is s
+        thangType = _.find @settings.supermodel.getModels(ThangType), (m) -> m.get('original') is s and m.get('kind')
         name = ThangNode.thangNameMap[s] = thangType.get 'name'
         ThangNode.thangKindMap[s] = thangType.get 'kind'
       kind = ThangNode.thangKindMap[s]
@@ -514,4 +525,4 @@ class ThangNode extends TreemaObjectNode
     @buildValueForDisplaySimply valEl, s
 
   onEnterPressed: ->
-    Backbone.Mediator.publish 'edit-level-thang', levelThang: @data.id
+    Backbone.Mediator.publish 'edit-level-thang', thangID: @data.id

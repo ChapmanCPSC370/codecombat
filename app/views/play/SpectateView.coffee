@@ -135,9 +135,9 @@ module.exports = class SpectateLevelView extends RootView
 
   showGuide: ->
     @seenDocs = true
-    DocsModal = require './level/modal/docs_modal'
+    LevelGuideModal = require './level/modal/LevelGuideModal'
     options = {docs: @levelLoader.level.get('documentation'), supermodel: @supermodel}
-    @openModalView(new DocsModal(options), true)
+    @openModalView(new LevelGuideModal(options), true)
     Backbone.Mediator.subscribeOnce 'modal-closed', @onLevelLoaderLoaded, @
     return true
 
@@ -239,7 +239,7 @@ module.exports = class SpectateLevelView extends RootView
     @insertSubView new HUDView {}
     worldName = utils.i18n @level.attributes, 'name'
     @controlBar = @insertSubView new ControlBarView {worldName: worldName, session: @session, level: @level, supermodel: @supermodel, playableTeams: @world.playableTeams, spectateGame: true}
-  #Backbone.Mediator.publish('level-set-debug', debug: true) if me.displayName() is 'Nick!'
+    #Backbone.Mediator.publish('level-set-debug', debug: true) if me.displayName() is 'Nick'
 
   afterInsert: ->
     super()
