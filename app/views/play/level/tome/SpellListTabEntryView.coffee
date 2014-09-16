@@ -10,25 +10,29 @@ module.exports = class SpellListTabEntryView extends SpellListEntryView
   id: 'spell-list-tab-entry-view'
 
   subscriptions:
-    'level-disable-controls': 'onDisableControls'
-    'level-enable-controls': 'onEnableControls'
+    'level:disable-controls': 'onDisableControls'
+    'level:enable-controls': 'onEnableControls'
     'tome:spell-loaded': 'onSpellLoaded'
     'tome:spell-changed': 'onSpellChanged'
     'god:new-world-created': 'onNewWorld'
     'tome:spell-changed-language': 'onSpellChangedLanguage'
-    'tome:fullscreen-view': 'onFullscreenClick'
+    'tome:toggle-maximize': 'onToggleMaximize'
 
   events:
     'click .spell-list-button': 'onDropdownClick'
     'click .reload-code': 'onCodeReload'
     'click .beautify-code': 'onBeautifyClick'
-    'click .fullscreen-code': 'onFullscreenClick'
+    'click .fullscreen-code': 'onToggleMaximize'
 
   constructor: (options) ->
     super options
 
   getRenderData: (context={}) ->
     context = super context
+    ctrl = if @isMac() then 'Cmd' else 'Ctrl'
+    shift = $.i18n.t 'keyboard_shortcuts.shift'
+    context.beautifyShortcutVerbose = "#{ctrl}+#{shift}+B: #{$.i18n.t 'keyboard_shortcuts.beautify'}"
+    context.maximizeShortcutVerbose = "#{ctrl}+#{shift}+M: #{$.i18n.t 'keyboard_shortcuts.maximize_editor'}"
     context
 
   afterRender: ->
@@ -74,7 +78,8 @@ module.exports = class SpellListTabEntryView extends SpellListEntryView
       trigger: 'hover'
       content: docFormatter.formatPopover()
       container: @$el.parent()
-    )
+    ).on 'show.bs.popover', =>
+      Backbone.Mediator.publish 'audio-player:play-sound', trigger: "spell-tab-entry-open", volume: 0.75
 
   onMouseEnterAvatar: (e) ->  # Don't call super
   onMouseLeaveAvatar: (e) ->  # Don't call super
@@ -84,21 +89,23 @@ module.exports = class SpellListTabEntryView extends SpellListEntryView
 
   onDropdownClick: (e) ->
     return unless @controlsEnabled
-    Backbone.Mediator.publish 'tome:toggle-spell-list'
+    Backbone.Mediator.publish 'tome:toggle-spell-list', {}
+    Backbone.Mediator.publish 'audio-player:play-sound', trigger: 'spell-list-open', volume: 1
 
-  onCodeReload: ->
+  onCodeReload: (e) ->
     return unless @controlsEnabled
     Backbone.Mediator.publish 'tome:reload-code', spell: @spell
 
-  onBeautifyClick: ->
+  onBeautifyClick: (e) ->
     return unless @controlsEnabled
-    Backbone.Mediator.publish 'spell-beautify', spell: @spell
+    Backbone.Mediator.publish 'tome:spell-beautify', spell: @spell
 
-  onFullscreenClick: ->
-    $codearea = $('#code-area')
-    $codearea.css 'z-index', 20 unless $codearea.hasClass 'fullscreen-editor'
-    $('#code-area').toggleClass 'fullscreen-editor'
+  onToggleMaximize: (e) ->
+    $codearea = $('html')
+    $('#code-area').css 'z-index', 20 unless $codearea.hasClass 'fullscreen-editor'
+    $('html').toggleClass 'fullscreen-editor'
     $('.fullscreen-code').toggleClass 'maximized'
+    Backbone.Mediator.publish 'tome:maximize-toggled', {}
 
   updateReloadButton: ->
     changed = @spell.hasChanged null, @spell.getSource()
@@ -140,7 +147,7 @@ module.exports = class SpellListTabEntryView extends SpellListEntryView
   attachTransitionEventListener: =>
     transitionListener = ''
     testEl = document.createElement 'fakeelement'
-    transitions = 
+    transitions =
       'transition':'transitionend'
       'OTransition':'oTransitionEnd'
       'MozTransition':'transitionend'
@@ -151,7 +158,7 @@ module.exports = class SpellListTabEntryView extends SpellListEntryView
         break
     $codearea = $('#code-area')
     $codearea.on transitionListener, =>
-      $codearea.css 'z-index', 1 unless $codearea.hasClass 'fullscreen-editor'
+      $codearea.css 'z-index', 1 unless $('html').hasClass 'fullscreen-editor'
 
 
   destroy: ->

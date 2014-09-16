@@ -22,12 +22,12 @@ module.exports = class RegionChooser extends CocoClass
   onMouseMove: (e) =>
     return unless @firstPoint
     @secondPoint = @options.camera.screenToWorld {x: e.stageX, y: e.stageY}
-    @restrictRegion() if @options.restrictRatio
+    @restrictRegion() if @options.restrictRatio or key.alt
     @updateShape()
 
   onMouseUp: (e) =>
     return unless @firstPoint
-    Backbone.Mediator.publish 'choose-region', points: [@firstPoint, @secondPoint]
+    Backbone.Mediator.publish 'surface:choose-region', points: [@firstPoint, @secondPoint]
     @firstPoint = null
     @secondPoint = null
     @options.camera.dragDisabled = false

@@ -31,8 +31,8 @@ module.exports = class SpellView extends CocoView
     'emacs': 'ace/keyboard/emacs'
 
   subscriptions:
-    'level-disable-controls': 'onDisableControls'
-    'level-enable-controls': 'onEnableControls'
+    'level:disable-controls': 'onDisableControls'
+    'level:enable-controls': 'onEnableControls'
     'surface:frame-changed': 'onFrameChanged'
     'surface:coordinate-selected': 'onCoordinateSelected'
     'god:new-world-created': 'onNewWorld'
@@ -42,14 +42,16 @@ module.exports = class SpellView extends CocoView
     'tome:reload-code': 'onCodeReload'
     'tome:spell-changed': 'onSpellChanged'
     'level:session-will-save': 'onSessionWillSave'
-    'modal-closed': 'focus'
+    'modal:closed': 'focus'
     'tome:focus-editor': 'focus'
     'tome:spell-statement-index-updated': 'onStatementIndexUpdated'
     'tome:change-language': 'onChangeLanguage'
     'tome:change-config': 'onChangeEditorConfig'
     'tome:update-snippets': 'addZatannaSnippets'
     'tome:insert-snippet': 'onInsertSnippet'
-    'spell-beautify': 'onSpellBeautify'
+    'tome:spell-beautify': 'onSpellBeautify'
+    'tome:maximize-toggled': 'onMaximizeToggled'
+    'script:state-changed': 'onScriptStateChange'
 
   events:
     'mouseout': 'onMouseOut'
@@ -78,6 +80,7 @@ module.exports = class SpellView extends CocoView
   createACE: ->
     # Test themes and settings here: http://ace.ajax.org/build/kitchen-sink.html
     aceConfig = me.get('aceConfig') ? {}
+    @destroyAceEditor(@ace)
     @ace = ace.edit @$el.find('.ace')[0]
     @aceSession = @ace.getSession()
     @aceDoc = @aceSession.getDocument()
@@ -114,56 +117,65 @@ module.exports = class SpellView extends CocoView
       bindKey: {win: 'Shift-Enter|Ctrl-Enter', mac: 'Shift-Enter|Command-Enter|Ctrl-Enter'}
       exec: -> Backbone.Mediator.publish 'tome:manual-cast', {}
     addCommand
+      name: 'run-code-real-time'
+      bindKey: {win: 'Ctrl-Shift-Enter', mac: 'Command-Shift-Enter|Ctrl-Shift-Enter'}
+      exec: -> Backbone.Mediator.publish 'tome:manual-cast', {realTime: true}
+    addCommand
       name: 'no-op'
       bindKey: {win: 'Ctrl-S', mac: 'Command-S|Ctrl-S'}
       exec: ->  # just prevent page save call
     addCommand
       name: 'toggle-playing'
       bindKey: {win: 'Ctrl-P', mac: 'Command-P|Ctrl-P'}
-      exec: -> Backbone.Mediator.publish 'level-toggle-playing'
+      exec: -> Backbone.Mediator.publish 'level:toggle-playing', {}
     addCommand
       name: 'end-current-script'
       bindKey: {win: 'Shift-Space', mac: 'Shift-Space'}
-      passEvent: true  # https://github.com/ajaxorg/ace/blob/master/lib/ace/keyboard/keybinding.js#L114
-    # No easy way to selectively cancel shift+space, since we don't get access to the event.
-    # Maybe we could temporarily set ourselves to read-only if we somehow know that a script is active?
-      exec: -> Backbone.Mediator.publish 'level:shift-space-pressed'
+      # passEvent: true  # https://github.com/ajaxorg/ace/blob/master/lib/ace/keyboard/keybinding.js#L114
+      # No easy way to selectively cancel shift+space, since we don't get access to the event.
+      # Maybe we could temporarily set ourselves to read-only if we somehow know that a script is active?
+      exec: =>
+        if @scriptRunning
+          Backbone.Mediator.publish 'level:shift-space-pressed', {}
+        else
+          @ace.insert ' '
+
     addCommand
       name: 'end-all-scripts'
       bindKey: {win: 'Escape', mac: 'Escape'}
-      exec: -> Backbone.Mediator.publish 'level:escape-pressed'
+      exec: -> Backbone.Mediator.publish 'level:escape-pressed', {}
     addCommand
       name: 'toggle-grid'
       bindKey: {win: 'Ctrl-G', mac: 'Command-G|Ctrl-G'}
-      exec: -> Backbone.Mediator.publish 'level-toggle-grid'
+      exec: -> Backbone.Mediator.publish 'level:toggle-grid', {}
     addCommand
       name: 'toggle-debug'
       bindKey: {win: 'Ctrl-\\', mac: 'Command-\\|Ctrl-\\'}
-      exec: -> Backbone.Mediator.publish 'level-toggle-debug'
+      exec: -> Backbone.Mediator.publish 'level:toggle-debug', {}
     addCommand
       name: 'toggle-pathfinding'
       bindKey: {win: 'Ctrl-O', mac: 'Command-O|Ctrl-O'}
-      exec: -> Backbone.Mediator.publish 'level-toggle-pathfinding'
+      exec: -> Backbone.Mediator.publish 'level:toggle-pathfinding', {}
     addCommand
       name: 'level-scrub-forward'
       bindKey: {win: 'Ctrl-]', mac: 'Command-]|Ctrl-]'}
-      exec: -> Backbone.Mediator.publish 'level-scrub-forward'
+      exec: -> Backbone.Mediator.publish 'level:scrub-forward', {}
     addCommand
       name: 'level-scrub-back'
       bindKey: {win: 'Ctrl-[', mac: 'Command-[|Ctrl-]'}
-      exec: -> Backbone.Mediator.publish 'level-scrub-back'
+      exec: -> Backbone.Mediator.publish 'level:scrub-back', {}
     addCommand
       name: 'spell-step-forward'
       bindKey: {win: 'Ctrl-Alt-]', mac: 'Command-Alt-]|Ctrl-Alt-]'}
-      exec: -> Backbone.Mediator.publish 'spell-step-forward'
+      exec: -> Backbone.Mediator.publish 'tome:spell-step-forward', {}
     addCommand
       name: 'spell-step-backward'
       bindKey: {win: 'Ctrl-Alt-[', mac: 'Command-Alt-[|Ctrl-Alt-]'}
-      exec: -> Backbone.Mediator.publish 'spell-step-backward'
+      exec: -> Backbone.Mediator.publish 'tome:spell-step-backward', {}
     addCommand
       name: 'spell-beautify'
       bindKey: {win: 'Ctrl-Shift-B', mac: 'Command-Shift-B|Ctrl-Shift-B'}
-      exec: -> Backbone.Mediator.publish 'spell-beautify'
+      exec: -> Backbone.Mediator.publish 'tome:spell-beautify', {}
     addCommand
       name: 'prevent-line-jump'
       bindKey: {win: 'Ctrl-L', mac: 'Command-L'}
@@ -171,8 +183,8 @@ module.exports = class SpellView extends CocoView
       exec: ->  # just prevent default ACE go-to-line alert
     addCommand
       name: 'open-fullscreen-editor'
-      bindKey: {win: 'Alt-Shift-F', mac: 'Ctrl-Shift-F'}
-      exec: -> Backbone.Mediator.publish 'tome:fullscreen-view'
+      bindKey: {win: 'Ctrl-Shift-M', mac: 'Command-Shift-M|Ctrl-Shift-M'}
+      exec: -> Backbone.Mediator.publish 'tome:toggle-maximize', {}
 
   fillACE: ->
     @ace.setValue @spell.source
@@ -193,7 +205,7 @@ module.exports = class SpellView extends CocoView
             tabTrigger: doc.snippets[e.language].tab
           snippetEntries.push entry
 
-    # window.zatanna = @zatanna
+    # window.zatannaInstance = @zatanna
     # window.snippetEntries = snippetEntries
     lang = @editModes[e.language].substr 'ace/mode/'.length
     @zatanna.addSnippets snippetEntries, lang
@@ -263,23 +275,23 @@ module.exports = class SpellView extends CocoView
     # @addZatannaSnippets()
     @highlightCurrentLine()
 
-  cast: (preload=false) ->
-    Backbone.Mediator.publish 'tome:cast-spell', spell: @spell, thang: @thang, preload: preload
+  cast: (preload=false, realTime=false) ->
+    Backbone.Mediator.publish 'tome:cast-spell', spell: @spell, thang: @thang, preload: preload, realTime: realTime
 
   notifySpellChanged: =>
     Backbone.Mediator.publish 'tome:spell-changed', spell: @spell
 
   notifyEditingEnded: =>
     return if @aceDoc.undergoingFirepadOperation  # from my Firepad ACE adapter
-    Backbone.Mediator.publish('tome:editing-ended')
+    Backbone.Mediator.publish 'tome:editing-ended', {}
 
   notifyEditingBegan: =>
     return if @aceDoc.undergoingFirepadOperation  # from my Firepad ACE adapter
-    Backbone.Mediator.publish('tome:editing-began')
+    Backbone.Mediator.publish 'tome:editing-began', {}
 
   onManualCast: (e) ->
     cast = @$el.parent().length
-    @recompile cast
+    @recompile cast, e.realTime
     @focus() if cast
 
   onCodeReload: (e) ->
@@ -293,13 +305,16 @@ module.exports = class SpellView extends CocoView
   recompileIfNeeded: =>
     @recompile() if @recompileNeeded
 
-  recompile: (cast=true) ->
+  recompile: (cast=true, realTime=false) ->
     @setRecompileNeeded false
-    return if @spell.source is @getSource()
-    @spell.transpile @getSource()
-    @updateAether true, false
-    @cast() if cast
-    @notifySpellChanged()
+    hasChanged = @spell.source isnt @getSource()
+    if hasChanged
+      @spell.transpile @getSource()
+      @updateAether true, false
+    if cast and (hasChanged or realTime)
+      @cast(false, realTime)
+    if hasChanged
+      @notifySpellChanged()
 
   updateACEText: (source) ->
     @eventsSuppressed = true
@@ -333,6 +348,7 @@ module.exports = class SpellView extends CocoView
     ]
     @onCodeChangeMetaHandler = =>
       return if @eventsSuppressed
+      Backbone.Mediator.publish 'audio-player:play-sound', trigger: 'code-change', volume: 0.5
       @spell.hasChangedSignificantly @getSource(), @spellThang.aether.raw, (hasChanged) =>
         if not @spellThang or hasChanged
           callback() for callback in onSignificantChange  # Do these first
@@ -414,7 +430,7 @@ module.exports = class SpellView extends CocoView
     for aetherProblem, problemIndex in aether.getAllProblems()
       continue if key = aetherProblem.userInfo?.key and key of seenProblemKeys
       seenProblemKeys[key] = true if key
-      @problems.push problem = new Problem aether, aetherProblem, @ace, isCast and problemIndex is 0, isCast
+      @problems.push problem = new Problem aether, aetherProblem, @ace, isCast and problemIndex is 0, isCast, @spell.levelID
       annotations.push problem.annotation if problem.annotation
     @aceSession.setAnnotations annotations
     @highlightCurrentLine aether.flow unless _.isEmpty aether.flow
@@ -466,7 +482,7 @@ module.exports = class SpellView extends CocoView
   onSessionWillSave: (e) ->
     return unless @spellHasChanged
     setTimeout(=>
-      unless @spellHasChanged
+      unless @destroyed or @spellHasChanged
         @$el.find('.save-status').finish().show().fadeOut(2000)
     , 1000)
     @spellHasChanged = false
@@ -504,7 +520,7 @@ module.exports = class SpellView extends CocoView
       spellThang.castAether = aether
       spellThang.aether = @spell.createAether thang
     #console.log thangID, @spell.spellKey, 'ran', aether.metrics.callsExecuted, 'times over', aether.metrics.statementsExecuted, 'statements, with max recursion depth', aether.metrics.maxDepth, 'and full flow/metrics', aether.metrics, aether.flow
-    @spell.transpile()
+    @spell.transpile()  # TODO: is there any way we can avoid doing this if it hasn't changed? Causes a slight hang.
     @updateAether false, false
 
   # --------------------------------------------------------------------------------------------------
@@ -652,6 +668,9 @@ module.exports = class SpellView extends CocoView
     pretty = @spellThang.aether.beautify ugly
     @ace.setValue pretty
 
+  onMaximizeToggled: (e) ->
+    _.delay (=> @ace?.resize true), 500  # Wait $level-resize-transition-time.
+
   onChangeEditorConfig: (e) ->
     aceConfig = me.get('aceConfig') ? {}
     @ace.setDisplayIndentGuides aceConfig.indentGuides # default false
@@ -683,6 +702,9 @@ module.exports = class SpellView extends CocoView
     @spell.hasChangedSignificantly @getSource(), null, (hasChanged) =>
       @recompile() if hasChanged
 
+  onScriptStateChange: (e) ->
+    @scriptRunning = if e.currentScript is null then false else true
+
   destroy: ->
     $(@ace?.container).find('.ace_gutter').off 'click', '.ace_error, .ace_warning, .ace_info', @onAnnotationClick
     @firepad?.dispose()
@@ -690,5 +712,6 @@ module.exports = class SpellView extends CocoView
     @ace?.destroy()
     @aceDoc?.off 'change', @onCodeChangeMetaHandler
     @aceSession?.selection.off 'changeCursor', @onCursorActivity
+    @destroyAceEditor(@ace)
     @debugView?.destroy()
     super()

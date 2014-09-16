@@ -8,24 +8,30 @@ module.exports = class CastButtonView extends CocoView
 
   events:
     'click .cast-button': 'onCastButtonClick'
-    'click .autocast-delays a': 'onCastOptionsClick'
+    'click .cast-real-time-button': 'onCastRealTimeButtonClick'
 
   subscriptions:
     'tome:spell-changed': 'onSpellChanged'
     'tome:cast-spells': 'onCastSpells'
     'god:world-load-progress-changed': 'onWorldLoadProgressChanged'
     'god:new-world-created': 'onNewWorld'
+    'real-time-multiplayer:joined-game': 'onJoinedRealTimeMultiplayerGame'
+    'real-time-multiplayer:left-game': 'onLeftRealTimeMultiplayerGame'
 
   constructor: (options) ->
     super options
     @spells = options.spells
     @levelID = options.levelID
     @castShortcut = '⇧↵'
-    @castShortcutVerbose = 'Shift+Enter'
 
   getRenderData: (context={}) ->
     context = super context
-    context.castShortcutVerbose = @castShortcutVerbose
+    shift = $.i18n.t 'keyboard_shortcuts.shift'
+    enter = $.i18n.t 'keyboard_shortcuts.enter'
+    castShortcutVerbose = "#{shift}+#{enter}"
+    castRealTimeShortcutVerbose = (if @isMac() then 'Cmd' else 'Ctrl') + '+' + castShortcutVerbose
+    context.castVerbose = castShortcutVerbose + ': ' + $.i18n.t('keyboard_shortcuts.cast_spell')
+    context.castRealTimeVerbose = castRealTimeShortcutVerbose + ': ' + $.i18n.t('keyboard_shortcuts.run_real_time')
     context
 
   afterRender: ->
@@ -33,10 +39,8 @@ module.exports = class CastButtonView extends CocoView
     @castButton = $('.cast-button', @$el)
     @castButtonGroup = $('.cast-button-group', @$el)
     @castOptions = $('.autocast-delays', @$el)
-    delay = me.get('autocastDelay')
-    delay ?= 5000
-    unless @levelID in ['rescue-mission', 'grab-the-mushroom', 'drink-me', 'its-a-trap', 'break-the-prison', 'taunt', 'cowardly-taunt', 'commanding-followers', 'mobile-artillery']
-      delay = 90019001
+    #delay = me.get('autocastDelay')  # No more autocast
+    delay = 90019001
     @setAutocastDelay delay
 
   attachTo: (spellView) ->
@@ -45,11 +49,17 @@ module.exports = class CastButtonView extends CocoView
   onCastButtonClick: (e) ->
     Backbone.Mediator.publish 'tome:manual-cast', {}
 
-  onCastOptionsClick: (e) =>
-    Backbone.Mediator.publish 'tome:focus-editor'
-    @castButtonGroup.removeClass 'open'
-    @setAutocastDelay $(e.target).attr 'data-delay'
-    false
+  onCastRealTimeButtonClick: (e) ->
+    if @multiplayerSession
+      Backbone.Mediator.publish 'real-time-multiplayer:manual-cast', {}
+      # Wait for multiplayer session to be up and running
+      @multiplayerSession.on 'change', (e) =>
+        if @multiplayerSession.get('state') is 'running'
+          # Real-time multiplayer session is ready to go, so resume normal cast
+          @multiplayerSession.off()
+          Backbone.Mediator.publish 'tome:manual-cast', {realTime: true}
+    else
+      Backbone.Mediator.publish 'tome:manual-cast', {realTime: true}
 
   onSpellChanged: (e) ->
     @updateCastButton()
@@ -58,7 +68,7 @@ module.exports = class CastButtonView extends CocoView
     return if e.preload
     @casting = true
     if @hasStartedCastingOnce  # Don't play this sound the first time
-      Backbone.Mediator.publish 'play-sound', trigger: 'cast', volume: 0.5
+      Backbone.Mediator.publish 'audio-player:play-sound', trigger: 'cast', volume: 0.5
     @hasStartedCastingOnce = true
     @updateCastButton()
     @onWorldLoadProgressChanged progress: 0
@@ -71,7 +81,7 @@ module.exports = class CastButtonView extends CocoView
   onNewWorld: (e) ->
     @casting = false
     if @hasCastOnce  # Don't play this sound the first time
-      Backbone.Mediator.publish 'play-sound', trigger: 'cast-end', volume: 0.5
+      Backbone.Mediator.publish 'audio-player:play-sound', trigger: 'cast-end', volume: 0.5
     @hasCastOnce = true
     @updateCastButton()
 
@@ -95,9 +105,18 @@ module.exports = class CastButtonView extends CocoView
   setAutocastDelay: (delay) ->
     #console.log 'Set autocast delay to', delay
     return unless delay
+    delay = 90019001  # No more autocast
     @autocastDelay = delay = parseInt delay
     me.set('autocastDelay', delay)
     me.patch()
-    spell.view.setAutocastDelay delay for spellKey, spell of @spells
+    spell.view?.setAutocastDelay delay for spellKey, spell of @spells
     @castOptions.find('a').each ->
       $(@).toggleClass('selected', parseInt($(@).attr('data-delay')) is delay)
+
+  onJoinedRealTimeMultiplayerGame: (e) ->
+    @multiplayerSession = e.session
+
+  onLeftRealTimeMultiplayerGame: (e) ->
+    if @multiplayerSession
+      @multiplayerSession.off()
+      @multiplayerSession = null

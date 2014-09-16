@@ -27,7 +27,10 @@ module.exports = class LevelChatView extends CocoView
 
   updateMultiplayerVisibility: ->
     return unless @$el?
-    @$el.toggle Boolean @session.get('multiplayer')
+    try
+      @$el.toggle Boolean @session.get('multiplayer')
+    catch e
+      console.error "Couldn't toggle the style on the LevelChatView to #{Boolean @session.get('multiplayer')} because of an error:", e
 
   afterRender: ->
     @chatTables = $('table', @$el)
@@ -51,7 +54,7 @@ module.exports = class LevelChatView extends CocoView
     @playNoise() if e.message.authorID isnt me.id
 
   playNoise: ->
-    Backbone.Mediator.publish 'play-sound', trigger: 'chat_received'
+    Backbone.Mediator.publish 'audio-player:play-sound', trigger: 'chat_received'
 
   messageObjectToJQuery: (message) ->
     td = $('<td></td>')

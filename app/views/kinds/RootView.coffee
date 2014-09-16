@@ -6,6 +6,7 @@ CocoView = require './CocoView'
 {logoutUser, me} = require('lib/auth')
 locale = require 'locale/locale'
 
+Achievement = require 'models/Achievement'
 AchievementPopup = require 'views/achievements/AchievementPopup'
 utils = require 'lib/utils'
 
@@ -19,12 +20,12 @@ filterKeyboardEvents = (allowedEvents, func) ->
 
 module.exports = class RootView extends CocoView
   showBackground: true
-  
+
   events:
     'click #logout-button': 'logoutAccount'
     'change .language-dropdown': 'onLanguageChanged'
     'click .toggle-fullscreen': 'toggleFullscreen'
-    'click .auth-button': 'onClickAuthbutton'
+    'click .auth-button': 'onClickAuthButton'
     'click a': 'toggleModal'
     'click button': 'toggleModal'
     'click li': 'toggleModal'
@@ -35,8 +36,8 @@ module.exports = class RootView extends CocoView
   showNewAchievement: (achievement, earnedAchievement) ->
     popup = new AchievementPopup achievement: achievement, earnedAchievement: earnedAchievement
 
-  handleNewAchievements: (earnedAchievements) ->
-    _.each earnedAchievements.models, (earnedAchievement) =>
+  handleNewAchievements: (e) ->
+    _.each e.earnedAchievements.models, (earnedAchievement) =>
       achievement = new Achievement(_id: earnedAchievement.get('achievement'))
       achievement.fetch
         success: (achievement) => @showNewAchievement(achievement, earnedAchievement)
@@ -49,7 +50,7 @@ module.exports = class RootView extends CocoView
     subview = new WizardSettingsModal {}
     @openModalView subview
 
-  onClickAuthbutton: ->
+  onClickAuthButton: ->
     AuthModal = require 'views/modal/AuthModal'
     @openModalView new AuthModal {}
 
@@ -65,13 +66,12 @@ module.exports = class RootView extends CocoView
     #location.hash = ''
     #location.hash = hash
     @renderScrollbar()
-    #@$('.antiscroll-wrap').antiscroll()  # not yet, buggy
 
   getRenderData: ->
     c = super()
     c.showBackground = @showBackground
     c
-  
+
   afterRender: ->
     super(arguments...)
     @chooseTab(location.hash.replace('#', '')) if location.hash
@@ -88,7 +88,7 @@ module.exports = class RootView extends CocoView
     if $select.hasClass('fancified')
       $select.parent().find('.options, .trigger').remove()
       $select.unwrap().removeClass('fancified')
-    preferred = me.lang()
+    preferred = me.get('preferredLanguage', true)
     codes = _.keys(locale)
     genericCodes = _.filter codes, (code) ->
       _.find(codes, (code2) ->
@@ -134,6 +134,7 @@ module.exports = class RootView extends CocoView
             d.msRequestFullscreen or
             (if d.webkitRequestFullscreen then -> d.webkitRequestFullscreen Element.ALLOW_KEYBOARD_INPUT else null)
       req?.call d
+      Backbone.Mediator.publish 'audio-player:play-sound', trigger: 'full-screen-start', volume: 1 if req
     else
       nah = document.exitFullscreen or
             document.mozCancelFullScreen or
@@ -141,4 +142,5 @@ module.exports = class RootView extends CocoView
             document.msExitFullscreen or
             document.webkitExitFullscreen
       nah?.call document
+      Backbone.Mediator.publish 'audio-player:play-sound', trigger: 'full-screen-end', volume: 1 if nah
     return

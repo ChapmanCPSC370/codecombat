@@ -5,42 +5,36 @@ ThangType = require 'models/ThangType'
 CocoCollection = require 'collections/CocoCollection'
 ItemView = require './ItemView'
 
-DEFAULT_EQUIPMENT = {
-  'right-hand': '53e21249b82921000051ce11'
-  'feet':'53e214f153457600003e3eab'
-  'eyes': '53e2167653457600003e3eb3'
-  'left-hand': '53e22aa153457600003e3ef5'
-}
-
 module.exports = class InventoryView extends CocoView
   id: 'inventory-view'
   className: 'tab-pane'
   template: template
-  slots: ["head","eyes","neck","torso","wrists","gloves","left-ring","right-ring","right-hand","left-hand","waist","feet","spellbook","programming-book","pet","minion","misc-0","misc-1","misc-2","misc-3","misc-4"]
-  
+  slots: ['head', 'eyes', 'neck', 'torso', 'wrists', 'gloves', 'left-ring', 'right-ring', 'right-hand', 'left-hand', 'waist', 'feet', 'spellbook', 'programming-book', 'pet', 'minion', 'misc-0', 'misc-1', 'misc-2', 'misc-3', 'misc-4']
+
   events:
     'click .item-slot': 'onItemSlotClick'
     'click #available-equipment .list-group-item': 'onAvailableItemClick'
     'dblclick #available-equipment .list-group-item': 'onAvailableItemDoubleClick'
     'dblclick .item-slot .item-view': 'onEquippedItemDoubleClick'
-    
+    'click #swap-button': 'onClickSwapButton'
+
   shortcuts:
     'esc': 'clearSelection'
-  
+
   initialize: (options) ->
     super(arguments...)
-    @items = new CocoCollection([], { model: ThangType })
-    @equipment = options.equipment or DEFAULT_EQUIPMENT
-    @items.url = '/db/thang.type?view=items&project=name,description,components,original'
+    @items = new CocoCollection([], {model: ThangType})
+    @equipment = options.equipment or @options.session?.get('heroConfig')?.inventory or {}
+    @items.url = '/db/thang.type?view=items&project=name,description,components,original,rasterIcon'
     @supermodel.loadCollection(@items, 'items')
-    
+
   onLoaded: ->
     super()
 
   getRenderData: (context={}) ->
     context = super(context)
     context.equipped = _.values(@equipment)
-    context.items = @items.models 
+    context.items = @items.models
 
     for item in @items.models
       item.classes = item.getAllowedSlots()
@@ -56,7 +50,7 @@ module.exports = class InventoryView extends CocoView
   afterRender: ->
     super()
     return unless @supermodel.finished()
-    
+
     keys = (item.id for item in @items.models)
     itemMap = _.zipObject keys, @items.models
 
@@ -64,7 +58,7 @@ module.exports = class InventoryView extends CocoView
     for slottedItemStub in @$el.find('.replace-me')
       itemID = $(slottedItemStub).data('item-id')
       item = itemMap[itemID]
-      itemView = new ItemView({item:item, includes:{name:true}})
+      itemView = new ItemView({item: item, includes: {name: true}})
       itemView.render()
       $(slottedItemStub).replaceWith(itemView.$el)
       @registerSubView(itemView)
@@ -72,13 +66,13 @@ module.exports = class InventoryView extends CocoView
     for availableItemEl in @$el.find('#available-equipment .list-group-item')
       itemID = $(availableItemEl).data('item-id')
       item = itemMap[itemID]
-      itemView = new ItemView({item:item, includes:{name:true}})
+      itemView = new ItemView({item: item, includes: {name: true}})
       itemView.render()
       $(availableItemEl).append(itemView.$el)
       @registerSubView(itemView)
-      
+
     @delegateEvents()
-    
+
   clearSelection: ->
     @$el.find('.panel-info').removeClass('panel-info')
     @$el.find('.list-group-item').removeClass('active')
@@ -87,29 +81,65 @@ module.exports = class InventoryView extends CocoView
   onItemSlotClick: (e) ->
     slot = $(e.target).closest('.panel')
     wasActive = slot.hasClass('panel-info')
-    @$el.find('#equipped .panel').removeClass('panel-info')
-    @$el.find('#available-equipment .list-group-item').removeClass('active') if slot.hasClass('disabled')
-    slot.addClass('panel-info') # unless wasActive
-    @onSelectionChanged()
-    
-  onAvailableItemClick: (e) ->
-    itemEl = $(e.target).closest('.list-group-item')
-    @$el.find('#available-equipment .list-group-item').removeClass('active')
-    itemEl.addClass('active')
+    @unselectAllSlots()
+    @unselectAllAvailableEquipment() if slot.hasClass('disabled')
+    @selectSlot(slot) unless wasActive and not $(e.target).closest('.item-view')[0]
     @onSelectionChanged()
 
-  onAvailableItemDoubleClick: ->
-    slot = @$el.find('#equipped .item-slot.panel-info')
-    slot = $('.panel:not(.disabled):first') if not slot.length
+  onAvailableItemClick: (e) ->
+    itemContainer = $(e.target).closest('.list-group-item')
+    @unselectAllAvailableEquipment()
+    @selectAvailableItem(itemContainer)
+    @onSelectionChanged()
+
+  onAvailableItemDoubleClick: (e) ->
+    slot = @getSelectedSlot()
+    slot = @$el.find('.panel:not(.disabled):first') if not slot.length
     @unequipItemFromSlot(slot)
     @equipSelectedItemToSlot(slot)
     @onSelectionChanged()
-    
+
   onEquippedItemDoubleClick: (e) ->
+    @unselectAllAvailableEquipment()
     slot = $(e.target).closest('.item-slot')
-    @unequipItemFromSlot(slot)
+    @selectAvailableItem(@unequipItemFromSlot(slot))
     @onSelectionChanged()
-    
+
+  onClickSwapButton: ->
+    slot = @getSelectedSlot()
+    selectedItemContainer = @$el.find('#available-equipment .list-group-item.active')
+    return unless slot[0] or selectedItemContainer[0]
+    slot = @$el.find('.panel:not(.disabled):first') if not slot.length
+    itemContainer = @unequipItemFromSlot(slot)
+    @equipSelectedItemToSlot(slot)
+    @selectAvailableItem(itemContainer)
+    @selectSlot(slot)
+    @onSelectionChanged()
+
+  getSelectedSlot: ->
+    @$el.find('#equipped .item-slot.panel-info')
+
+  unselectAllAvailableEquipment: ->
+    @$el.find('#available-equipment .list-group-item').removeClass('active')
+
+  unselectAllSlots: ->
+    @$el.find('#equipped .panel').removeClass('panel-info')
+
+  selectSlot: (slot) ->
+    slot.addClass('panel-info')
+
+  getSlot: (name) ->
+    @$el.find(".item-slot[data-slot=#{name}]")
+
+  getSelectedAvailableItemContainer: ->
+    @$el.find('#available-equipment .list-group-item.active')
+
+  getAvailableItemContainer: (itemID) ->
+    @$el.find("#available-equipment .list-group-item[data-item-id='#{itemID}']")
+
+  selectAvailableItem: (itemContainer) ->
+    itemContainer?.addClass('active')
+
   unequipItemFromSlot: (slot) ->
     itemIDToUnequip = slot.find('.item-view').data('item-id')
     return unless itemIDToUnequip
@@ -117,43 +147,34 @@ module.exports = class InventoryView extends CocoView
     for el in @$el.find('#available-equipment .list-group-item')
       itemID = $(el).find('.item-view').data('item-id')
       if itemID is itemIDToUnequip
-        $(el).removeClass('equipped')
+        return $(el).removeClass('equipped')
 
   equipSelectedItemToSlot: (slot) ->
-    selectedItemContainer = @$el.find('#available-equipment .list-group-item.active')
+    selectedItemContainer = @getSelectedAvailableItemContainer()
     newItemHTML = selectedItemContainer.html()
-    @$el.find('#available-equipment .list-group-item.active').addClass('equipped')
-    container = slot.find('.panel-body')
-    container.html(newItemHTML)
-    container.find('.item-view').data('item-id', selectedItemContainer.find('.item-view').data('item-id'))
+    selectedItemContainer .addClass('equipped')
+    slotContainer = slot.find('.panel-body')
+    slotContainer.html(newItemHTML)
+    slotContainer.find('.item-view').data('item-id', selectedItemContainer.find('.item-view').data('item-id'))
     @$el.find('.list-group-item').removeClass('active')
-    
+
   onSelectionChanged: ->
     @$el.find('.item-slot').show()
-    
+
     selectedSlot = @$el.find('.panel.panel-info')
     selectedItem = @$el.find('#available-equipment .list-group-item.active')
-    
+
     if selectedSlot.length
       @$el.find('#available-equipment .list-group-item').hide()
       @$el.find("#available-equipment .list-group-item.#{selectedSlot.data('slot')}").show()
-      
+
       selectedSlotItemID = selectedSlot.find('.item-view').data('item-id')
       if selectedSlotItemID
         item = _.find @items.models, {id:selectedSlotItemID}
-        
-        if not @selectedEquippedItemView
-          @selectedEquippedItemView = new ItemView({
-            item: item, includes: {name: true, stats: true}})
-          @insertSubView(@selectedEquippedItemView, @$el.find('#selected-equipped-item .item-view-stub'))
-          
-        else
-          @selectedEquippedItemView.$el.show()
-          @selectedEquippedItemView.item = item
-          @selectedEquippedItemView.render()
-          
+        @showSelectedSlotItem(item)
+
       else
-        @selectedEquippedItemView?.$el.hide()
+        @hideSelectedSlotItem()
 
     else
       @$el.find('#available-equipment .list-group-item').show()
@@ -162,7 +183,7 @@ module.exports = class InventoryView extends CocoView
     @$el.find('.item-slot').removeClass('disabled')
     if selectedItem.length
       item = _.find @items.models, {id:selectedItem.find('.item-view').data('item-id')}
-      
+
       # update which slots are enabled
       allowedSlots = item.getAllowedSlots()
       for slotEl in @$el.find('.item-slot')
@@ -170,21 +191,40 @@ module.exports = class InventoryView extends CocoView
         if slotName not in allowedSlots
           $(slotEl).addClass('disabled')
 
-      # updated selected item view
-      if not @selectedAvailableItemView
-        @selectedAvailableItemView = new ItemView({
-          item: item, includes: {name: true, stats: true}})
-        @insertSubView(@selectedAvailableItemView, @$el.find('#selected-available-item .item-view-stub'))
-      
-      else
-        @selectedAvailableItemView.$el.show()
-        @selectedAvailableItemView.item = item
-        @selectedAvailableItemView.render()
-        
+      @showSelectedAvailableItem(item)
+
     else
-      @selectedAvailableItemView?.$el.hide()
-    
+      @hideSelectedAvailableItem()
+
     @delegateEvents()
+
+  showSelectedSlotItem: (item) ->
+    if not @selectedEquippedItemView
+      @selectedEquippedItemView = new ItemView({
+        item: item, includes: {name: true, stats: true, props: true}})
+      @insertSubView(@selectedEquippedItemView, @$el.find('#selected-equipped-item .item-view-stub'))
+
+    else
+      @selectedEquippedItemView.$el.show()
+      @selectedEquippedItemView.item = item
+      @selectedEquippedItemView.render()
+
+  hideSelectedSlotItem: ->
+    @selectedEquippedItemView?.$el.hide()
+
+  showSelectedAvailableItem: (item) ->
+    if not @selectedAvailableItemView
+      @selectedAvailableItemView = new ItemView({
+        item: item, includes: {name: true, stats: true, props: true}})
+      @insertSubView(@selectedAvailableItemView, @$el.find('#selected-available-item .item-view-stub'))
+
+    else
+      @selectedAvailableItemView.$el.show()
+      @selectedAvailableItemView.item = item
+      @selectedAvailableItemView.render()
+
+  hideSelectedAvailableItem: ->
+    @selectedAvailableItemView?.$el.hide()
 
   getCurrentEquipmentConfig: ->
     config = {}
@@ -194,5 +234,16 @@ module.exports = class InventoryView extends CocoView
       continue unless slotItemID
       item = _.find @items.models, {id:slotItemID}
       config[slotName] = item.get('original')
-      
-    config 
+
+    config
+
+  onHidden: ->
+    inventory = @getCurrentEquipmentConfig()
+    heroConfig = @options.session.get('heroConfig') ? {}
+    return if _.isEqual inventory, (heroConfig.inventory ? {})
+    heroConfig.inventory = inventory
+    heroConfig.thangType ?= '529ffbf1cf1818f2be000001'  # Temp: assign Tharin as the hero
+    @options.session.set 'heroConfig', heroConfig
+    @options.session.patch success: ->
+      _.defer ->
+        Backbone.Mediator.publish 'level:inventory-changed', {}

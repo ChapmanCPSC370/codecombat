@@ -18,7 +18,8 @@ module.exports = class ForkModal extends ModalView
     @model = options.model
     @modelClass = @model.constructor
 
-  forkModel: ->
+  forkModel: (e) ->
+    e.preventDefault()
     @showLoading()
     forms.clearFormAlerts(@$el)
     newModel = new @modelClass($.extend(true, {}, @model.attributes))
@@ -30,7 +31,7 @@ module.exports = class ForkModal extends ModalView
     newModel.unset 'parent'
     newModel.set 'commitMessage', "Forked from #{@model.get('name')}"
     newModel.set 'name', @$el.find('#fork-model-name').val()
-    if @model.get 'permissions'
+    if @model.schema().properties.permissions
       newModel.set 'permissions', [access: 'owner', target: me.id]
     newPathPrefix = "editor/#{@editorPath}/"
     res = newModel.save()

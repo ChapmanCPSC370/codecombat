@@ -35,7 +35,6 @@ module.exports = class LevelLoader extends CocoClass
 
     @worldNecessities = []
     @listenTo @supermodel, 'resource-loaded', @onWorldNecessityLoaded
-    @loadSession()
     @loadLevel()
     @loadAudio()
     @playJingle()
@@ -44,14 +43,19 @@ module.exports = class LevelLoader extends CocoClass
     else
       @listenToOnce @supermodel, 'loaded-all', @onSupermodelLoaded
 
-  playJingle: ->
-    return if @headless
-    # Apparently the jingle, when it tries to play immediately during all this loading, you can't hear it.
-    # Add the timeout to fix this weird behavior.
-    f = ->
-      jingles = ['ident_1', 'ident_2']
-      AudioPlayer.playInterfaceSound jingles[Math.floor Math.random() * jingles.length]
-    setTimeout f, 500
+  # Supermodel (Level) Loading
+
+  loadLevel: ->
+    @level = @supermodel.getModel(Level, @levelID) or new Level _id: @levelID
+    if @level.loaded
+      @onLevelLoaded()
+    else
+      @level = @supermodel.loadModel(@level, 'level').model
+      @listenToOnce @level, 'sync', @onLevelLoaded
+
+  onLevelLoaded: ->
+    @loadSession()
+    @populateLevel()
 
   # Session Loading
 
@@ -66,36 +70,36 @@ module.exports = class LevelLoader extends CocoClass
     session = new LevelSession().setURL url
     @sessionResource = @supermodel.loadModel(session, 'level_session', {cache: false})
     @session = @sessionResource.model
-    @listenToOnce @session, 'sync', @onSessionLoaded
+    if @session.loaded
+      @loadDependenciesForSession @session
+    else
+      @listenToOnce @session, 'sync', ->
+        @session.url = -> '/db/level.session/' + @id
+        @loadDependenciesForSession @session
 
     if @opponentSessionID
       opponentSession = new LevelSession().setURL "/db/level_session/#{@opponentSessionID}"
       @opponentSessionResource = @supermodel.loadModel(opponentSession, 'opponent_session')
       @opponentSession = @opponentSessionResource.model
-      @listenToOnce @opponentSession, 'sync', @onSessionLoaded
+      if @opponentSession.loaded
+        @loadDependenciesForSession @opponentSession
+      else
+        @listenToOnce @opponentSession, 'sync', @loadDependenciesForSession
 
-  onSessionLoaded: (session) ->
-    session.url = -> '/db/level.session/' + @id
-    if heroConfig = session.get('heroConfig')
-      url = "/db/thang.type/#{heroConfig.thangType}/version?project=name,components,original"
+  loadDependenciesForSession: (session) ->
+    return unless @level.get('type', true) is 'hero'
+    heroConfig = session.get('heroConfig')
+    unless heroConfig
+      heroConfig = {inventory: {}, thangType: '529ffbf1cf1818f2be000001'}  # Temp: assign Tharin as the hero
+      session.set 'heroConfig', heroConfig
+    url = "/db/thang.type/#{heroConfig.thangType}/version?project=name,components,original"
+    @worldNecessities.push @maybeLoadURL(url, ThangType, 'thang')
+
+    for itemThangType in _.values(heroConfig.inventory)
+      url = "/db/thang.type/#{itemThangType}/version?project=name,components,original"
       @worldNecessities.push @maybeLoadURL(url, ThangType, 'thang')
 
-      for itemThangType in _.values(heroConfig.inventory)
-        url = "/db/thang.type/#{itemThangType}/version?project=name,components,original"
-        @worldNecessities.push @maybeLoadURL(url, ThangType, 'thang')
-
-  # Supermodel (Level) Loading
-
-  loadLevel: ->
-    @level = @supermodel.getModel(Level, @levelID) or new Level _id: @levelID
-    if @level.loaded
-      @populateLevel()
-    else
-      @level = @supermodel.loadModel(@level, 'level').model
-      @listenToOnce @level, 'sync', @onLevelLoaded
-
-  onLevelLoaded: ->
-    @populateLevel()
+  # Grabbing the rest of the required data for the level
 
   populateLevel: ->
     thangIDs = []
@@ -103,9 +107,10 @@ module.exports = class LevelLoader extends CocoClass
     systemVersions = []
     articleVersions = []
 
-    for thang in @level.get('thangs') or []
+    flagThang = thangType: '53fa25f25bc220000052c2be', id: 'Placeholder Flag', components: []
+    for thang in (@level.get('thangs') or []).concat [flagThang]
       thangIDs.push thang.thangType
-      @loadItemThangsEquippedByLevelThang(thang)
+      @loadThangsRequiredByLevelThang(thang)
       for comp in thang.components or []
         componentVersions.push _.pick(comp, ['original', 'majorVersion'])
 
@@ -149,22 +154,28 @@ module.exports = class LevelLoader extends CocoClass
 
     @worldNecessities = @worldNecessities.concat worldNecessities
 
-  loadItemThangsEquippedByLevelThang: (levelThang) ->
-    return unless levelThang.components
-    for component in levelThang.components
-      if component.original is LevelComponent.EquipsID and inventory = component.config?.inventory
-        for itemThangType in _.values(inventory)
-          unless itemThangType
-            console.warn "Empty item in inventory for", levelThang
-            continue
-          url = "/db/thang.type/#{itemThangType}/version?project=name,components,original"
-          @worldNecessities.push @maybeLoadURL(url, ThangType, 'thang')
+  loadThangsRequiredByLevelThang: (levelThang) ->
+    @loadThangsRequiredFromComponentList levelThang.components
+
+  loadThangsRequiredByThangType: (thangType) ->
+    @loadThangsRequiredFromComponentList thangType.get('components')
+
+  loadThangsRequiredFromComponentList: (components) ->
+    return unless components
+    requiredThangTypes = []
+    for component in components when component.config
+      if component.original is LevelComponent.EquipsID
+        requiredThangTypes.push itemThangType for itemThangType in _.values (component.config.inventory ? {})
+      else if component.config.requiredThangTypes
+        requiredThangTypes = requiredThangTypes.concat component.config.requiredThangTypes
+    for thangType in requiredThangTypes
+      url = "/db/thang.type/#{thangType}/version?project=name,components,original"
+      @worldNecessities.push @maybeLoadURL(url, ThangType, 'thang')
 
   onThangNamesLoaded: (thangNames) ->
-    if @level.get('type') is 'hero'
-      for thangType in thangNames.models
-        @loadDefaultComponentsForThangType(thangType)
-        @loadEquippedItemsInheritedFromThangType(thangType)
+    for thangType in thangNames.models
+      @loadDefaultComponentsForThangType(thangType)
+      @loadThangsRequiredByThangType(thangType)
 
   loadDefaultComponentsForThangType: (thangType) ->
     return unless components = thangType.get('components')
@@ -172,23 +183,11 @@ module.exports = class LevelLoader extends CocoClass
       url = "/db/level.component/#{component.original}/version/#{component.majorVersion}"
       @worldNecessities.push @maybeLoadURL(url, LevelComponent, 'component')
 
-  loadEquippedItemsInheritedFromThangType: (thangType) ->
-    for levelThang in @level.get('thangs') or []
-      if levelThang.thangType is thangType.get('original')
-        levelThang = $.extend true, {}, levelThang
-        @level.denormalizeThang(levelThang, @supermodel)
-        equipsComponent = _.find levelThang.components, {original: LevelComponent.EquipsID}
-        inventory = equipsComponent.config?.inventory
-        continue unless inventory
-        for itemThangType in _.values inventory
-          url = "/db/thang.type/#{itemThangType}/version?project=name,components,original"
-          @worldNecessities.push @maybeLoadURL(url, ThangType, 'thang')
-
   onWorldNecessityLoaded: (resource) ->
     index = @worldNecessities.indexOf(resource)
-    if (@level?.loading or (@level?.get('type') is 'hero')) and resource.name is 'thang'
+    if resource.name is 'thang'
       @loadDefaultComponentsForThangType(resource.model)
-      @loadEquippedItemsInheritedFromThangType(resource.model)
+      @loadThangsRequiredByThangType(resource.model)
 
     return unless index >= 0
     @worldNecessities.splice(index, 1)
@@ -207,7 +206,7 @@ module.exports = class LevelLoader extends CocoClass
 
     for thangTypeName in thangsToLoad
       thangType = nameModelMap[thangTypeName]
-      continue if thangType.isFullyLoaded()
+      continue if not thangType or thangType.isFullyLoaded()
       thangType.fetch()
       thangType = @supermodel.loadModel(thangType, 'thang').model
       res = @supermodel.addSomethingResource 'sprite_sheet', 5
@@ -215,7 +214,7 @@ module.exports = class LevelLoader extends CocoClass
       res.markLoading()
       @spriteSheetsToBuild.push res
 
-    @buildLoopInterval = setInterval @buildLoop, 5
+    @buildLoopInterval = setInterval @buildLoop, 5 if @spriteSheetsToBuild.length
 
   maybeLoadURL: (url, Model, resourceName) ->
     return if @supermodel.getModel(url)
@@ -249,6 +248,7 @@ module.exports = class LevelLoader extends CocoClass
     resource = null
     for resource in @spriteSheetsToBuild
       break if e.thangType is resource.thangType
+    return console.error 'Did not find spriteSheetToBuildResource for', e unless resource
     resource.spriteSheetKeys = (k for k in resource.spriteSheetKeys when k isnt e.key)
     resource.markLoaded() if resource.spriteSheetKeys.length is 0
 
@@ -320,11 +320,20 @@ module.exports = class LevelLoader extends CocoClass
     @initialized = true
     @world = new World()
     @world.levelSessionIDs = if @opponentSessionID then [@sessionID, @opponentSessionID] else [@sessionID]
-    serializedLevel = @level.serialize(@supermodel)
+    serializedLevel = @level.serialize(@supermodel, @session)
     @world.loadFromLevel serializedLevel, false
     console.log 'World has been initialized from level loader.'
 
   # Initial Sound Loading
+
+  playJingle: ->
+    return if @headless
+    # Apparently the jingle, when it tries to play immediately during all this loading, you can't hear it.
+    # Add the timeout to fix this weird behavior.
+    f = ->
+      jingles = ['ident_1', 'ident_2']
+      AudioPlayer.playInterfaceSound jingles[Math.floor Math.random() * jingles.length]
+    setTimeout f, 500
 
   loadAudio: ->
     return if @headless

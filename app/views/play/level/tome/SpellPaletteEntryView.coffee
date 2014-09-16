@@ -9,6 +9,7 @@ module.exports = class SpellPaletteEntryView extends CocoView
   className: 'spell-palette-entry-view'
   template: template
   popoverPinned: false
+  overridePopoverTemplate: '<div class="popover spell-palette-popover" role="tooltip"><div class="arrow"></div><h3 class="popover-title"></h3><div class="popover-content"></div></div>'
 
   subscriptions:
     'surface:frame-changed': 'onFrameChanged'
@@ -41,10 +42,12 @@ module.exports = class SpellPaletteEntryView extends CocoView
       placement: 'top'
       trigger: 'manual'  # Hover, until they click, which will then pin it until unclick.
       content: @docFormatter.formatPopover()
-      container: '#tome-view'
-    )
-    @$el.on 'show.bs.popover', =>
+      container: 'body'
+      template: @overridePopoverTemplate
+    ).on 'show.bs.popover', =>
       Backbone.Mediator.publish 'tome:palette-hovered', thang: @thang, prop: @doc.name, entry: @
+      soundIndex = Math.floor(Math.random() * 4)
+      Backbone.Mediator.publish 'audio-player:play-sound', trigger: "spell-palette-entry-open-{soundIndex}", volume: 0.75
 
   onMouseEnter: (e) ->
     # Make sure the doc has the updated Thang so it can regenerate its prop value
@@ -58,16 +61,18 @@ module.exports = class SpellPaletteEntryView extends CocoView
   togglePinned: ->
     if @popoverPinned
       @popoverPinned = false
-      @$el.add('#tome-view .popover').removeClass 'pinned'
-      $('#tome-view .popover .close').remove()
+      @$el.add('.spell-palette-popover.popover').removeClass 'pinned'
+      $('.spell-palette-popover.popover .close').remove()
       @$el.popover 'hide'
+      Backbone.Mediator.publish 'audio-player:play-sound', trigger: 'spell-palette-entry-unpin', volume: 1
     else
       @popoverPinned = true
       @$el.popover 'show'
-      @$el.add('#tome-view .popover').addClass 'pinned'
+      @$el.add('.spell-palette-popover.popover').addClass 'pinned'
       x = $('<button type="button" data-dismiss="modal" aria-hidden="true" class="close">×</button>')
-      $('#tome-view .popover').append x
+      $('.spell-palette-popover.popover').append x
       x.on 'click', @onClick
+      Backbone.Mediator.publish 'audio-player:play-sound', trigger: 'spell-palette-entry-pin', volume: 1
     Backbone.Mediator.publish 'tome:palette-pin-toggled', entry: @, pinned: @popoverPinned
 
   onClick: (e) =>

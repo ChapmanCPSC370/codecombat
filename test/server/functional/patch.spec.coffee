@@ -71,13 +71,13 @@ describe '/db/patch', ->
   it 'does not add duplicate watchers', (done) ->
     watchingURL = getURL("/db/article/#{articles[0]._id}/watch")
     request.put {uri: watchingURL, json: {on: true}}, (err, res, body) ->
-      expect(body.watchers.length).toBe(2)
+      expect(body.watchers.length).toBe(4)
       done()
 
   it 'allows removing yourself', (done) ->
     watchingURL = getURL("/db/article/#{articles[0]._id}/watch")
     request.put {uri: watchingURL, json: {on: false}}, (err, res, body) ->
-      expect(body.watchers.length).toBe(1)
+      expect(body.watchers.length).toBe(3)
       done()
 
   it 'allows the submitter to withdraw the pull request', (done) ->
@@ -111,6 +111,7 @@ describe '/db/patch', ->
             expect(res.statusCode).toBe(200)
             Patch.findOne({}).exec (err, article) ->
               expect(article.get('status')).toBe 'accepted'
+              expect(article.get('acceptor')).toBeDefined()
               done()
 
   it 'keeps track of amount of submitted and accepted patches', (done) ->

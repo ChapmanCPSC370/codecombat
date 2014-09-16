@@ -9,35 +9,25 @@ app = require 'application'
 module.exports = class AchievementEditView extends RootView
   id: 'editor-achievement-edit-view'
   template: template
-  startsLoading: true
 
   events:
     'click #save-button': 'saveAchievement'
     'click #recalculate-button': 'confirmRecalculation'
     'click #delete-button': 'confirmDeletion'
 
-  subscriptions:
-    'save-new': 'saveAchievement'
-
   constructor: (options, @achievementID) ->
     super options
     @achievement = new Achievement(_id: @achievementID)
     @achievement.saveBackups = true
-
-    @achievement.once 'error', (achievement, jqxhr) =>
-      @hideLoading()
-      $(@$el).find('.main-content-area').children('*').not('.breadcrumb').remove()
-      errors.backboneFailure arguments...
-
-    @achievement.fetch()
-    @listenToOnce(@achievement, 'sync', @buildTreema)
+    @supermodel.loadModel @achievement, 'achievement'
     @pushChangesToPreview = _.throttle(@pushChangesToPreview, 500)
+
+  onLoaded: ->
+    super()
+    @buildTreema()
 
   buildTreema: ->
     return if @treema? or (not @achievement.loaded)
-
-    @startsLoading = false
-    @render()
     data = $.extend(true, {}, @achievement.attributes)
     options =
       data: data
@@ -47,8 +37,8 @@ module.exports = class AchievementEditView extends RootView
       callbacks:
         change: @pushChangesToPreview
     @treema = @$el.find('#achievement-treema').treema(options)
-
     @treema.build()
+    @pushChangesToPreview()
 
   getRenderData: (context={}) ->
     context = super(context)
@@ -57,21 +47,17 @@ module.exports = class AchievementEditView extends RootView
     context
 
   afterRender: ->
-    super(arguments...)
+    super()
+    return unless @supermodel.finished()
     @pushChangesToPreview()
 
   pushChangesToPreview: =>
-    $('#achievement-view').empty()
-
-    if @treema?
-      for key, value of @treema.data
-        @achievement.set key, value
-
-    earned =
-      earnedPoints: @achievement.get 'worth'
-
-    popup = new AchievementPopup achievement: @achievement, earnedAchievement:earned, popup: false, container: $('#achievement-view')
-
+    return unless @treema
+    @$el.find('#achievement-view').empty()
+    for key, value of @treema.data
+      @achievement.set key, value
+    earned = earnedPoints: @achievement.get 'worth'
+    popup = new AchievementPopup achievement: @achievement, earnedAchievement: earned, popup: false, container: $('#achievement-view')
 
   openSaveModal: ->
     'Maybe later' # TODO patch patch patch

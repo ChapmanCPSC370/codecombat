@@ -21,7 +21,6 @@ module.exports = class ThangTypeEditView extends RootView
   id: 'thang-type-edit-view'
   className: 'editor'
   template: template
-  startsLoading: true
   resolution: 4
   scale: 3
   mockThang:
@@ -45,7 +44,8 @@ module.exports = class ThangTypeEditView extends RootView
     'keyup .play-with-level-input': 'onPlayLevelKeyUp'
 
   subscriptions:
-    'save-new-version': 'saveNewThangType'
+    'editor:thang-type-color-groups-changed': 'onColorGroupsChanged'
+    'editor:save-new-version': 'saveNewThangType'
 
   # init / render
 
@@ -57,7 +57,12 @@ module.exports = class ThangTypeEditView extends RootView
     @thangType.saveBackups = true
     @listenToOnce @thangType, 'sync', ->
       @files = @supermodel.loadCollection(new DocumentFiles(@thangType), 'files').model
+      @updateFileSize()
     @refreshAnimation = _.debounce @refreshAnimation, 500
+
+  showLoading: ($el) ->
+    $el ?= @$el.find('.outer-content')
+    super($el)
 
   getRenderData: (context={}) ->
     context = super(context)
@@ -65,10 +70,11 @@ module.exports = class ThangTypeEditView extends RootView
     context.animations = @getAnimationNames()
     context.authorized = not me.get('anonymous')
     context.recentlyPlayedLevels = storage.load('recently-played-levels') ? ['items']
+    context.fileSizeString = @fileSizeString
     context
 
   getAnimationNames: ->
-    raw = _.keys(@thangType.get('raw').animations)
+    raw = _.keys(@thangType.get('raw', true).animations)
     raw = ("raw:#{name}" for name in raw)
     main = _.keys(@thangType.get('actions') or {})
     main.concat(raw)
@@ -83,6 +89,7 @@ module.exports = class ThangTypeEditView extends RootView
     @insertSubView(new ThangTypeColorsTabView(@thangType))
     @patchesView = @insertSubView(new PatchesView(@thangType), @$el.find('.patches-view'))
     @showReadOnly() if me.get('anonymous')
+    @updatePortrait()
 
   initComponents: =>
     options =
@@ -95,6 +102,11 @@ module.exports = class ThangTypeEditView extends RootView
 
   onComponentsChanged: (components) =>
     @thangType.set 'components', components
+
+  onColorGroupsChanged: (e) ->
+    @temporarilyIgnoringChanges = true
+    @treema.set 'colorGroups', e.colorGroups
+    @temporarilyIgnoringChanges = false
 
   makeDot: (color) ->
     circle = new createjs.Shape()
@@ -198,6 +210,16 @@ module.exports = class ThangTypeEditView extends RootView
     @treema.set('raw', @thangType.get('raw'))
     @updateSelectBox()
     @refreshAnimation()
+    @updateFileSize()
+
+  updateFileSize: ->
+    file = JSON.stringify(@thangType.attributes)
+    compressed = LZString.compress(file)
+    size = (file.length / 1024).toFixed(1) + "KB"
+    compressedSize = (compressed.length / 1024).toFixed(1) + "KB"
+    gzipCompressedSize = compressedSize * 1.65  # just based on comparing ogre barracks
+    @fileSizeString = "Size: #{size} (~#{compressedSize} gzipped)"
+    @$el.find('#thang-type-file-size').text @fileSizeString
 
   # animation select
 
@@ -364,8 +386,10 @@ module.exports = class ThangTypeEditView extends RootView
     el = @$el.find('#thang-type-treema')
     @treema = @$el.find('#thang-type-treema').treema(options)
     @treema.build()
+    @lastKind = data.kind
 
   pushChangesToPreview: =>
+    return if @temporarilyIgnoringChanges
     # TODO: This doesn't delete old Treema keys you deleted
     for key, value of @treema.data
       @thangType.set(key, value)
@@ -373,6 +397,11 @@ module.exports = class ThangTypeEditView extends RootView
     @refreshAnimation()
     @updateDots()
     @updatePortrait()
+    if (kind = @treema.data.kind) isnt @lastKind
+      @lastKind = kind
+      Backbone.Mediator.publish 'editor:thang-type-kind-changed', kind: kind
+      if kind in ['Doodad', 'Floor', 'Wall'] and not @treema.data.terrains
+        @treema.set '/terrains', ['Grass', 'Dungeon', 'Indoor']  # So editors know to set them.
 
   onSelectNode: (e, selected) =>
     selected = selected[0]
@@ -439,7 +468,7 @@ module.exports = class ThangTypeEditView extends RootView
     level = _.string.slugify level
     if @childWindow and not @childWindow.closed
       # Reset the LevelView's world, but leave the rest of the state alone
-      @childWindow.Backbone.Mediator.publish 'level-reload-thang-type', thangType: @thangType
+      @childWindow.Backbone.Mediator.publish 'level:reload-thang-type', thangType: @thangType
     else
       # Create a new Window with a blank LevelView
       scratchLevelID = level + '?dev=true'

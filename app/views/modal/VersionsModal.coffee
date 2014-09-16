@@ -1,6 +1,5 @@
 ModalView = require 'views/kinds/ModalView'
 template = require 'templates/modal/versions'
-tableTemplate = require 'templates/kinds/table'
 DeltaView = require 'views/editor/DeltaView'
 PatchModal = require 'views/editor/PatchModal'
 nameLoader = require 'lib/NameLoader'
@@ -17,7 +16,6 @@ class VersionsViewCollection extends CocoCollection
 
 module.exports = class VersionsModal extends ModalView
   template: template
-  startsLoading: true
   plain: true
   modalWidthPercent: 80
 

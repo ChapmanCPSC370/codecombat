@@ -57,11 +57,11 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
   currentAction: null  # related action that is right now playing
 
   subscriptions:
-    'level-sprite-dialogue': 'onDialogue'
-    'level-sprite-clear-dialogue': 'onClearDialogue'
-    'level-set-letterbox': 'onSetLetterbox'
+    'level:sprite-dialogue': 'onDialogue'
+    'level:sprite-clear-dialogue': 'onClearDialogue'
+    'level:set-letterbox': 'onSetLetterbox'
     'surface:ticked': 'onSurfaceTicked'
-    'level-sprite-move': 'onMove'
+    'sprite:move': 'onMove'
 
   constructor: (@thangType, options) ->
     super()
@@ -80,12 +80,14 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     @age = 0
     @stillLoading = true
     if @thangType.isFullyLoaded()
-      @setupSprite()
+      @setUpSprite()
     else
+      @thangType.setProjection null
       @thangType.fetch() unless @thangType.loading
-      @listenToOnce(@thangType, 'sync', @setupSprite)
+      @listenToOnce(@thangType, 'sync', @setUpSprite)
+      @setUpPlaceholder()
 
-  setupSprite: ->
+  setUpSprite: ->
     for trigger, sounds of @thangType.get('soundTriggers') or {} when trigger isnt 'say'
       AudioPlayer.preloadSoundReference sound for sound in sounds
     if @thangType.get('raster')
@@ -96,7 +98,8 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     else
       result = @buildSpriteSheet()
       if _.isString result # async build
-        @listenToOnce @thangType, 'build-complete', @setupSprite
+        @listenToOnce @thangType, 'build-complete', @setUpSprite
+        @setUpPlaceholder()
       else
         @stillLoading = false
         @actions = @thangType.getActions()
@@ -105,6 +108,7 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
         @queueAction 'idle'
 
   finishSetup: ->
+    @placeholder = null
     @updateBaseScale()
     @scaleFactorX = @thang.scaleFactorX if @thang?.scaleFactorX?
     @scaleFactorX = @thang.scaleFactor if @thang?.scaleFactor?
@@ -119,12 +123,35 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     $(image.image).one 'load', => @updateScale?()
     @configureMouse()
     @imageObject.sprite = @
-    @imageObject.layerPriority = @thangType.get 'layerPriority'
+    @imageObject.layerPriority = @thang?.layerPriority ? @thangType.get 'layerPriority'
     @imageObject.name = @thang?.spriteName or @thangType.get 'name'
     reg = @getOffset 'registration'
     @imageObject.regX = -reg.x
     @imageObject.regY = -reg.y
     @finishSetup()
+
+  setUpPlaceholder: ->
+    return if @placeholder or not @thang
+    shape = new createjs.Shape()
+    width = @thang.width * Camera.PPM
+    height = @thang.height * Camera.PPM * @options.camera.y2x
+    depth = @thang.depth * Camera.PPM * @options.camera.z2y * @options.camera.y2x
+    brightnessFuzzFactor = 1 + 0.1 * (Math.random() - 0.5)
+    makeColor = (brightnessFactor) => (Math.round(c * brightnessFuzzFactor * brightnessFactor) for c in (healthColors[@thang.team] ? [180, 180, 180]))
+    topColor = "rgba(#{makeColor(0.85).join(', ')},1)"
+    mainColor = "rgba(#{makeColor(0.75).join(', ')},1)"
+    ellipse = @thang.shape in ['ellipsoid', 'disc']
+    fn = if ellipse then 'drawEllipse' else 'drawRect'
+    shape.graphics.beginFill(mainColor)[fn](-width / 2, -height / 2, width, height).endFill()
+    if ellipse
+      shape.graphics.moveTo(-width / 2, 0).beginFill(mainColor).lineTo(-width / 2, -depth).lineTo(width / 2, -depth).lineTo(width / 2, 0).lineTo(-width / 2, 0).endFill()
+    else
+      shape.graphics.moveTo(-width / 2, 0).beginFill(mainColor).lineTo(-width / 2, -depth).lineTo(width / 2, -depth).lineTo(width / 2, 0).lineTo(-width / 2, 0).endFill()
+    shape.graphics.beginFill(topColor)[fn](-width / 2, -height / 2 - depth, width, height).endFill()
+    shape.layerPriority = @thang?.layerPriority ? @thangType.get 'layerPriority'
+    @setImageObject shape
+    @updatePosition true
+    @placeholder = shape
 
   toString: -> "<CocoSprite: #{@thang?.id}>"
 
@@ -138,6 +165,7 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     if parent = @imageObject?.parent
       parent.removeChild @imageObject
       parent.addChild newImageObject
+      parent.updateLayerOrder()
     @imageObject = newImageObject
 
   buildFromSpriteSheet: (spriteSheet) ->
@@ -151,7 +179,7 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     @configureMouse()
     # TODO: generalize this later?
     @imageObject.sprite = @
-    @imageObject.layerPriority = @thangType.get 'layerPriority'
+    @imageObject.layerPriority = @thang?.layerPriority ? @thangType.get 'layerPriority'
     @imageObject.name = @thang?.spriteName or @thangType.get 'name'
     @imageObject.on 'animationend', @playNextAction
     @finishSetup()
@@ -309,16 +337,19 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
       p1.z += bobOffset
     x: p1.x, y: p1.y, z: if @thang.isLand then 0 else p1.z - @thang.depth / 2
 
-  updatePosition: (log) ->
-    return if @stillLoading
+  updatePosition: (whileLoading=false) ->
+    return if @stillLoading and not whileLoading
     return unless @thang?.pos and @options.camera?
     wop = @getWorldPosition()
     [p0, p1] = [@lastPos, @thang.pos]
     return if p0 and p0.x is p1.x and p0.y is p1.y and p0.z is p1.z and not @options.camera.tweeningZoomTo and not @thang.bobHeight
     sup = @options.camera.worldToSurface wop
     [@imageObject.x, @imageObject.y] = [sup.x, sup.y]
-    @lastPos = p1.copy?() or _.clone(p1)
+    @lastPos = p1.copy?() or _.clone(p1) unless whileLoading
     @hasMoved = true
+    if @thangType.get('name') is 'Flag' and not @notOfThisWorld
+      # Let the pending flags know we're here (but not this call stack, they need to delete themselves, and we may be iterating sprites).
+      _.defer => Backbone.Mediator.publish 'surface:flag-appeared', sprite: @
 
   updateBaseScale: ->
     scale = 1
@@ -403,7 +434,7 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
         zFactor = vz / Math.sqrt(vz * vz + vx * vx)
         rotation -= xFactor * zFactor * 45
     imageObject ?= @imageObject
-    return imageObject.rotation = rotation if not rotationType
+    return imageObject.rotation = rotation if rotationType is 'free' or not rotationType
     @updateIsometricRotation(rotation, imageObject)
 
   getRotation: ->
@@ -514,14 +545,11 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
       @imageObject.on 'pressmove', @onMouseEvent, @, false, 'sprite:dragged'
       @imageObject.on 'pressup',   @onMouseEvent, @, false, 'sprite:mouse-up'
 
-  onSetLetterbox: (e) ->
-    @letterboxOn = e.on
-
   onMouseEvent: (e, ourEventName) ->
-    return if @letterboxOn
+    return if @letterboxOn or not @imageObject
     p = @imageObject
     p = p.parent while p.parent
-    newEvent = sprite: @, thang: @thang, originalEvent: e, canvas:p.canvas
+    newEvent = sprite: @, thang: @thang, originalEvent: e, canvas: p.canvas
     @trigger ourEventName, newEvent
     Backbone.Mediator.publish ourEventName, newEvent
 
@@ -673,15 +701,18 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     label = @addLabel 'dialogue', Label.STYLE_DIALOGUE
     label.setText e.blurb or '...'
     sound = e.sound ? AudioPlayer.soundForDialogue e.message, @thangType.get 'soundTriggers'
-    @instance?.stop()
-    if @instance = @playSound sound, false
-      @instance.addEventListener 'complete', -> Backbone.Mediator.publish 'dialogue-sound-completed'
+    @dialogueSoundInstance?.stop()
+    if @dialogueSoundInstance = @playSound sound, false
+      @dialogueSoundInstance.addEventListener 'complete', -> Backbone.Mediator.publish 'sprite:dialogue-sound-completed', {}
     @notifySpeechUpdated e
 
   onClearDialogue: (e) ->
     @labels.dialogue?.setText null
-    @instance?.stop()
+    @dialogueSoundInstance?.stop()
     @notifySpeechUpdated {}
+
+  onSetLetterbox: (e) ->
+    @letterboxOn = e.on
 
   setNameLabel: (name) ->
     label = @addLabel 'name', Label.STYLE_NAME
@@ -728,6 +759,7 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
     return null unless sound
     delay = if withDelay and sound.delay then 1000 * sound.delay / createjs.Ticker.getFPS() else 0
     name = AudioPlayer.nameForSoundReference sound
+    AudioPlayer.preloadSoundReference sound
     instance = AudioPlayer.playSound name, volume, delay, @getWorldPosition()
     #console.log @thang?.id, 'played sound', name, 'with delay', delay, 'volume', volume, 'and got sound instance', instance
     instance
@@ -744,7 +776,7 @@ module.exports = CocoSprite = class CocoSprite extends CocoClass
       distance = @thang.pos.distance target.pos
       offset = Math.max(target.width, target.height, 2) / 2 + 3
       pos = Vector.add(@thang.pos, heading.multiply(distance - offset))
-    Backbone.Mediator.publish 'level-sprite-clear-dialogue', {}
+    Backbone.Mediator.publish 'level:sprite-clear-dialogue', {}
     @onClearDialogue()
     args = [pos]
     args.push(e.duration) if e.duration?

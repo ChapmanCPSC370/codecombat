@@ -13,6 +13,7 @@ LevelSession = require '../levels/sessions/LevelSession'
 LevelSessionHandler = require '../levels/sessions/level_session_handler'
 EarnedAchievement = require '../achievements/EarnedAchievement'
 UserRemark = require './remarks/UserRemark'
+{isID} = require '../lib/utils'
 
 serverProperties = ['passwordHash', 'emailLower', 'nameLower', 'passwordReset']
 candidateProperties = [
@@ -161,7 +162,7 @@ UserHandler = class UserHandler extends Handler
   post: (req, res) ->
     return @sendBadInputError(res, 'No input.') if _.isEmpty(req.body)
     return @sendBadInputError(res, 'Must have an anonymous user to post with.') unless req.user
-    return @sendBadInputError(res, 'Existing users cannot create new ones.') unless req.user.get('anonymous')
+    return @sendBadInputError(res, 'Existing users cannot create new ones.') if req.user.get('anonymous') is false
     req.body._id = req.user._id if req.user.get('anonymous')
     @put(req, res)
 
@@ -187,6 +188,7 @@ UserHandler = class UserHandler extends Handler
     return @getRecentlyPlayed(req, res, args[0]) if args[1] is 'recently_played'
     return @trackActivity(req, res, args[0], args[2], args[3]) if args[1] is 'track' and args[2]
     return @getRemark(req, res, args[0]) if args[1] is 'remark'
+    return @searchForUser(req, res) if args[1] is 'admin_search'
     return @sendNotFoundError(res)
     super(arguments...)
 
@@ -208,7 +210,7 @@ UserHandler = class UserHandler extends Handler
           @sendSuccess(res, {result: 'success'})
 
   avatar: (req, res, id) ->
-    @modelClass.findBySlugOrId(id).exec (err, document) =>
+    @modelClass.findById(id).exec (err, document) =>
       return @sendDatabaseError(res, err) if err
       return @sendNotFoundError(res) unless document
       photoURL = document?.get('photoURL')
@@ -222,7 +224,7 @@ UserHandler = class UserHandler extends Handler
       res.end()
 
   getLevelSessionsForEmployer: (req, res, userID) ->
-    return @sendUnauthorizedError(res) unless req.user._id+'' is userID or req.user.isAdmin() or ('employer' in req.user.get('permissions'))
+    return @sendUnauthorizedError(res) unless req.user._id+'' is userID or req.user.isAdmin() or ('employer' in (req.user.get('permissions') ? []))
     query = creator: userID, levelID: {$in: ['gridmancer', 'greed', 'dungeon-arena', 'brawlwood', 'gold-rush']}
     projection = 'levelName levelID team playtime codeLanguage submitted code totalScore teamSpells level'
     LevelSession.find(query).select(projection).exec (err, documents) =>
@@ -278,7 +280,7 @@ UserHandler = class UserHandler extends Handler
     return @sendMethodNotAllowed res unless req.method is 'POST'
     isMe = userID is req.user._id + ''
     isAuthorized = isMe or req.user.isAdmin()
-    isAuthorized ||= ('employer' in req.user.get('permissions')) and (activityName in ['viewed_by_employer', 'contacted_by_employer'])
+    isAuthorized ||= ('employer' in (req.user.get('permissions') ? [])) and (activityName in ['viewed_by_employer', 'contacted_by_employer'])
     return @sendUnauthorizedError res unless isAuthorized
     updateUser = (user) =>
       activity = user.trackActivity activityName, increment
@@ -301,7 +303,7 @@ UserHandler = class UserHandler extends Handler
     if not profileData.id or not profileData.positions or not profileData.emailAddress or not profileData.firstName or not profileData.lastName
       return errors.badInput(res, 'You need to have a more complete profile to sign up for this service.')
     @modelClass.findById(req.user.id).exec (err, user) =>
-      if user.get('employerAt') or user.get('signedEmployerAgreement') or 'employer' in user.get('permissions')
+      if user.get('employerAt') or user.get('signedEmployerAgreement') or 'employer' in (user.get('permissions') ? [])
         return errors.conflict(res, 'You already have signed the agreement!')
       #TODO: Search for the current position
       employerAt = _.filter(profileData.positions.values, 'isCurrent')[0]?.company.name ? 'Not available'
@@ -320,7 +322,7 @@ UserHandler = class UserHandler extends Handler
         res.end()
 
   getCandidates: (req, res) ->
-    authorized = req.user.isAdmin() or ('employer' in req.user.get('permissions'))
+    authorized = req.user.isAdmin() or ('employer' in (req.user.get('permissions') ? []))
     months = if req.user.isAdmin() then 12 else 2
     since = (new Date((new Date()) - months * 30.4 * 86400 * 1000)).toISOString()
     query = {'jobProfile.updated': {$gt: since}}
@@ -388,25 +390,53 @@ UserHandler = class UserHandler extends Handler
       return @sendNotFoundError res unless remark?
       @sendSuccess res, remark
 
+  searchForUser: (req, res) ->
+    # TODO: also somehow search the CLAs to find a match amongst those fields and to find GitHub ids
+    return @sendUnauthorizedError(res) unless req.user.isAdmin()
+    search = req.body.search
+    query = email: {$exists: true}, $or: [
+      {emailLower: search}
+      {nameLower: search}
+    ]
+    query.$or.push {_id: mongoose.Types.ObjectId(search) if isID search}
+    if search.length > 5
+      searchParts = search.split(/[.+@]/)
+      if searchParts.length > 1
+        query.$or.push {emailLower: {$regex: '^' + searchParts[0]}}
+    projection = name: 1, email: 1, dateCreated: 1
+    User.find(query).select(projection).lean().exec (err, users) =>
+      return @sendDatabaseError res, err if err
+      @sendSuccess res, users
+
+
   countEdits = (model, done) ->
     statKey = User.statsMapping.edits[model.modelName]
     return done(new Error 'Could not resolve statKey for model') unless statKey?
-    User.find {}, (err, users) ->
-      async.eachSeries users, ((user, doneWithUser) ->
-        userObjectID = user.get('_id')
-        userStringID = userObjectID.toHexString()
+    userStream = User.find().stream()
+    streamFinished = false
+    usersTotal = 0
+    usersFinished = 0
+    doneWithUser = (err) ->
+      log.error err if err?
+      ++usersFinished
+      done?() if streamFinished and usersFinished is usersTotal
+    userStream.on 'error', (err) -> log.error err
+    userStream.on 'close', -> streamFinished = true
+    userStream.on 'data',  (user) ->
+      usersTotal += 1
+      userObjectID = user.get('_id')
+      userStringID = userObjectID.toHexString()
 
-        model.count {$or: [creator: userObjectID, creator: userStringID]}, (err, count) ->
-          if count
-            update = $set: {}
-            update.$set[statKey] = count
-          else
-            update = $unset: {}
-            update.$unset[statKey] = ''
-          User.findByIdAndUpdate user.get('_id'), update, (err) ->
-            log.error err if err?
-            doneWithUser()
-      ), done
+      model.count {$or: [creator: userObjectID, creator: userStringID]}, (err, count) ->
+        if count
+          update = $set: {}
+          update.$set[statKey] = count
+        else
+          update = $unset: {}
+          update.$unset[statKey] = ''
+        User.findByIdAndUpdate user.get('_id'), update, (err) ->
+          log.error err if err?
+          doneWithUser()
 
   # I don't like leaking big variables, could remove this for readability
   # Meant for passing into MongoDB
@@ -431,57 +461,84 @@ UserHandler = class UserHandler extends Handler
       update[method][statName] = count or ''
       User.findByIdAndUpdate user.get('_id'), update, doneUpdatingUser
 
-    User.find {}, (err, users) ->
-      async.eachSeries users, ((user, doneWithUser) ->
-        userObjectID = user.get '_id'
-        userStringID = userObjectID.toHexString()
-        # Extend query with a patch ownership test
-        _.extend query, {$or: [{creator: userObjectID}, {creator: userStringID}]}
+    userStream = User.find().stream()
+    streamFinished = false
+    usersTotal = 0
+    usersFinished = 0
+    doneWithUser = (err) ->
+      log.error err if err?
+      ++usersFinished
+      done?() if streamFinished and usersFinished is usersTotal
+    userStream.on 'error', (err) -> log.error err
+    userStream.on 'close', -> streamFinished = true
+    userStream.on 'data',  (user) ->
+      usersTotal += 1
+      userObjectID = user.get '_id'
+      userStringID = userObjectID.toHexString()
+      # Extend query with a patch ownership test
+      _.extend query, {$or: [{creator: userObjectID}, {creator: userStringID}]}
 
-        count = 0
-        stream = Patch.where(query).stream()
-        stream.on 'data', (doc) -> ++count if filter doc
-        stream.on 'error', (err) ->
-          updateUser user, count, doneWithUser
-          log.error "Recalculating #{statName} for user #{user} stopped prematurely because of error"
-        stream.on 'close', ->
-          updateUser user, count, doneWithUser
-      ), done
+      count = 0
+      stream = Patch.where(query).stream()
+      stream.on 'data', (doc) -> ++count if filter doc
+      stream.on 'error', (err) ->
+        updateUser user, count, doneWithUser
+        log.error "Recalculating #{statName} for user #{user} stopped prematurely because of error"
+      stream.on 'close', ->
+        updateUser user, count, doneWithUser
 
   countPatchesByUsers = (query, statName, done) ->
     Patch = require '../patches/Patch'
 
-    User.find {}, (err, users) ->
-      async.eachSeries users, ((user, doneWithUser) ->
-        userObjectID = user.get '_id'
-        userStringID = userObjectID.toHexString()
-        # Extend query with a patch ownership test
-        _.extend query, {$or: [{creator: userObjectID}, {creator: userStringID}]}
+    userStream = User.find().stream()
+    streamFinished = false
+    usersTotal = 0
+    usersFinished = 0
+    doneWithUser = (err) ->
+      log.error err if err?
+      ++usersFinished
+      done?() if streamFinished and usersFinished is usersTotal
+    userStream.on 'error', (err) -> log.error err
+    userStream.on 'close', -> streamFinished = true
+    userStream.on 'data',  (user) ->
+      usersTotal += 1
+      userObjectID = user.get '_id'
+      userStringID = userObjectID.toHexString()
+      # Extend query with a patch ownership test
+      _.extend query, {$or: [{creator: userObjectID}, {creator: userStringID}]}
 
-        Patch.count query, (err, count) ->
-          method = if count then '$set' else '$unset'
-          update = {}
-          update[method] = {}
-          update[method][statName] = count or ''
-          User.findByIdAndUpdate user.get('_id'), update, doneWithUser
-      ), done
+      Patch.count query, (err, count) ->
+        method = if count then '$set' else '$unset'
+        update = {}
+        update[method] = {}
+        update[method][statName] = count or ''
+        User.findByIdAndUpdate user.get('_id'), update, doneWithUser
 
   statRecalculators:
     gamesCompleted: (done) ->
       LevelSession = require '../levels/sessions/LevelSession'
 
-      User.find {}, (err, users) ->
-        async.eachSeries users, ((user, doneWithUser) ->
-          userID = user.get('_id').toHexString()
+      userStream = User.find().stream()
+      streamFinished = false
+      usersTotal = 0
+      usersFinished = 0
+      doneWithUser = (err) ->
+        log.error err if err?
+        ++usersFinished
+        done?() if streamFinished and usersFinished is usersTotal
+      userStream.on 'error', (err) -> log.error err
+      userStream.on 'close', -> streamFinished = true
+      userStream.on 'data',  (user) ->
+        usersTotal += 1
+        userID = user.get('_id').toHexString()
 
-          LevelSession.count {creator: userID, 'state.completed': true}, (err, count) ->
-            update = if count then {$set: 'stats.gamesCompleted': count} else {$unset: 'stats.gamesCompleted': ''}
-            User.findByIdAndUpdate user.get('_id'), update, doneWithUser
-        ), done
+        LevelSession.count {creator: userID, 'state.completed': true}, (err, count) ->
+          update = if count then {$set: 'stats.gamesCompleted': count} else {$unset: 'stats.gamesCompleted': ''}
+          User.findByIdAndUpdate user.get('_id'), update, doneWithUser
 
     articleEdits: (done) ->
       Article = require '../articles/Article'
-      countEdits Article,  done
+      countEdits Article, done
 
     levelEdits: (done) ->
       Level = require '../levels/Level'
@@ -542,7 +599,7 @@ UserHandler = class UserHandler extends Handler
     thangTypeTranslationPatches: (done) ->
       countPatchesByUsersInMemory {'target.collection': 'thang_type'}, isTranslationPatch, User.statsMapping.translations['thang.type'], done
 
-      
+
   recalculateStats: (statName, done) =>
     done new Error 'Recalculation handler not found' unless statName of @statRecalculators
     @statRecalculators[statName] done

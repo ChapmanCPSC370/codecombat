@@ -11,16 +11,16 @@ module.exports = class LevelHUDView extends CocoView
 
   subscriptions:
     'surface:frame-changed': 'onFrameChanged'
-    'level-disable-controls': 'onDisableControls'
-    'level-enable-controls': 'onEnableControls'
+    'level:disable-controls': 'onDisableControls'
+    'level:enable-controls': 'onEnableControls'
     'surface:sprite-selected': 'onSpriteSelected'
     'sprite:speech-updated': 'onSpriteDialogue'
-    'level-sprite-clear-dialogue': 'onSpriteClearDialogue'
+    'level:sprite-clear-dialogue': 'onSpriteClearDialogue'
     'level:shift-space-pressed': 'onShiftSpacePressed'
     'level:escape-pressed': 'onEscapePressed'
-    'dialogue-sound-completed': 'onDialogueSoundCompleted'
-    'thang-began-talking': 'onThangBeganTalking'
-    'thang-finished-talking': 'onThangFinishedTalking'
+    'sprite:dialogue-sound-completed': 'onDialogueSoundCompleted'
+    'sprite:thang-began-talking': 'onThangBeganTalking'
+    'sprite:thang-finished-talking': 'onThangFinishedTalking'
     'god:new-world-created': 'onNewWorld'
 
   events:
@@ -31,7 +31,7 @@ module.exports = class LevelHUDView extends CocoView
     @$el.addClass 'no-selection'
 
   onClick: (e) ->
-    Backbone.Mediator.publish 'tome:focus-editor' unless $(e.target).parents('.thang-props').length
+    Backbone.Mediator.publish 'tome:focus-editor', {} unless $(e.target).parents('.thang-props').length
 
   onFrameChanged: (e) ->
     @timeProgress = e.progress
@@ -70,6 +70,8 @@ module.exports = class LevelHUDView extends CocoView
     @thang = e.world.thangMap[@thang.id] if @thang
     if hadThang and not @thang
       @setThang null, null
+    else if @thang
+      @createActions()  # Make sure it updates its actions.
 
   setThang: (thang, thangType) ->
     unless @speaker
@@ -195,7 +197,7 @@ module.exports = class LevelHUDView extends CocoView
       @lastResponses = null
     @bubble.append($("<h3>#{@speaker ? 'Captain Anya'}</h3>"))
     @animator = new DialogueAnimator(message, @bubble)
-    @messageInterval = setInterval(@addMoreMessage, 20)
+    @messageInterval = setInterval(@addMoreMessage, 1000 / 30)  # 30 FPS
 
   addMoreMessage: =>
     if @animator.done()
@@ -205,21 +207,23 @@ module.exports = class LevelHUDView extends CocoView
       if @lastResponses
         buttons = $('.enter button')
         for response, i in @lastResponses
-          f = (r) => => setTimeout((-> Backbone.Mediator.publish(r.channel, r.event)), 10)
+          channel = response.channel.replace 'level-set-playing', 'level:set-playing'  # Easier than migrating all those victory buttons.
+          f = (r) => => setTimeout((-> Backbone.Mediator.publish(channel, r.event or {})), 10)
           $(buttons[i]).click(f(response))
       else
-        $('.enter', @bubble).click(-> Backbone.Mediator.publish('end-current-script'))
+        $('.enter', @bubble).click(-> Backbone.Mediator.publish('script:end-current-script', {}))
       return
     @animator.tick()
 
   onShiftSpacePressed: (e) ->
     @shiftSpacePressed = (@shiftSpacePressed || 0) + 1
-    # We don't need to handle end-current-script--that's done--but if we do have
+    # We don't need to handle script:end-current-script--that's done--but if we do have
     # custom buttons, then we need to trigger the one that should fire (the last one).
     # If we decide that always having the last one fire is bad, we should make it smarter.
     return unless @lastResponses?.length
     r = @lastResponses[@lastResponses.length - 1]
-    _.delay (-> Backbone.Mediator.publish(r.channel, r.event)), 10
+    channel = r.channel.replace 'level-set-playing', 'level:set-playing'
+    _.delay (-> Backbone.Mediator.publish(channel, r.event or {})), 10
 
   onEscapePressed: (e) ->
     @escapePressed = true
@@ -261,7 +265,7 @@ module.exports = class LevelHUDView extends CocoView
       return null  # included in the bar
     context =
       prop: prop
-      hasIcon: prop in ['health', 'pos', 'target', 'collectedThangIDs', 'gold', 'bountyGold', 'visualRange', 'attackDamage', 'attackRange', 'maxSpeed']
+      hasIcon: prop in ['health', 'pos', 'target', 'collectedThangIDs', 'gold', 'bountyGold', 'visualRange', 'attackDamage', 'attackRange', 'maxSpeed', 'attackNearbyEnemyRange']
       hasBar: prop in ['health']
     $(prop_template(context))
 

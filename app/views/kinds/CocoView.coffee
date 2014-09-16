@@ -17,7 +17,7 @@ module.exports = class CocoView extends Backbone.View
 
   events:
     'click .retry-loading-resource': 'onRetryResource'
-    'click .retry-loading-request': 'onRetryRequest'
+    'click .skip-loading-resource': 'onSkipResource'
 
   subscriptions: {}
   shortcuts: {}
@@ -64,6 +64,13 @@ module.exports = class CocoView extends Backbone.View
     @off = doNothing
     @destroy = doNothing
     $.noty.closeAll()
+
+  destroyAceEditor: (editor) ->
+    # convenience method to make sure the ace editor is as destroyed as can be
+    return unless editor
+    session = editor.getSession()
+    session.setMode ''
+    editor.destroy()
 
   afterInsert: ->
 
@@ -149,6 +156,13 @@ module.exports = class CocoView extends Backbone.View
     @$el.find('.progress').show()
     $(e.target).closest('.loading-error-alert').remove()
 
+  onSkipResource: (e) ->
+    res = @supermodel.getResource($(e.target).data('resource-index'))
+    return unless res and res.isFailed
+    res.markLoaded()
+    @$el.find('.progress').show()
+    $(e.target).closest('.loading-error-alert').remove()
+
   # Modals
 
   @lastToggleModalCall = 0
@@ -179,7 +193,7 @@ module.exports = class CocoView extends Backbone.View
     $('#modal-wrapper .modal').modal(modalOptions).on 'hidden.bs.modal', @modalClosed
     window.currentModal = modalView
     @getRootView().stopListeningToShortcuts(true)
-    Backbone.Mediator.publish 'modal-opened', {}
+    Backbone.Mediator.publish 'modal:opened', {}
 
   modalClosed: =>
     visibleModal.willDisappear() if visibleModal
@@ -193,7 +207,7 @@ module.exports = class CocoView extends Backbone.View
       @openModalView(wm)
     else
       @getRootView().listenToShortcuts(true)
-      Backbone.Mediator.publish 'modal-closed', {}
+      Backbone.Mediator.publish 'modal:closed', {}
 
   # Loading RootViews
 
@@ -268,7 +282,7 @@ module.exports = class CocoView extends Backbone.View
     view.parentKey = key
     @subviews[key] = view
     view
-    
+
   makeSubViewKey: (view) ->
     key = view.id or (view.constructor.name+classCount++)
     key = _.string.underscored(key)  # handy for autocomplete in dev console
@@ -304,6 +318,10 @@ module.exports = class CocoView extends Backbone.View
 
   isMac: ->
     navigator.platform.toUpperCase().indexOf('MAC') isnt -1
+
+  isIPadApp: ->
+    return @_isIPadApp if @_isIPadApp?
+    return @_isIPadApp = webkit?.messageHandlers? and navigator.userAgent?.indexOf('iPad') isnt -1
 
   initSlider: ($el, startValue, changeCallback) ->
     slider = $el.slider({animate: 'fast'})

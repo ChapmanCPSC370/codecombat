@@ -11,11 +11,11 @@ module.exports = class SaveVersionModal extends ModalView
   modalWidthPercent: 60
 
   events:
-    'click #save-version-button': 'onClickSaveButton'
+    'click #save-version-button': 'saveChanges'
     'click #cla-link': 'onClickCLALink'
     'click #agreement-button': 'onAgreedToCLA'
     'click #submit-patch-button': 'submitPatch'
-    'submit form': 'submitPatch'
+    'submit form': 'onSubmitForm'
 
   constructor: (options) ->
     super options
@@ -37,11 +37,15 @@ module.exports = class SaveVersionModal extends ModalView
         deltaView = new DeltaView({model: @model})
         @insertSubView(deltaView, changeEl)
       catch e
-        console.error 'Couldn\'t create delta view:', e
+        console.error 'Couldn\'t create delta view:', e, e.stack
     @$el.find('.commit-message input').attr('placeholder', $.i18n.t('general.commit_msg'))
 
-  onClickSaveButton: ->
-    Backbone.Mediator.publish 'save-new-version', {
+  onSubmitForm: (e) ->
+    e.preventDefault()
+    if @isPatch then @submitPatch() else @saveChanges()
+
+  saveChanges: ->
+    Backbone.Mediator.publish 'editor:save-new-version', {
       major: @$el.find('#major-version').prop('checked')
       commitMessage: @$el.find('#commit-message').val()
     }

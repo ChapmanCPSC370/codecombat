@@ -10,12 +10,11 @@ module.exports = class CocoRouter extends Backbone.Router
   initialize: ->
     # http://nerds.airbnb.com/how-to-add-google-analytics-page-tracking-to-57536
     @bind 'route', @_trackPageView
-    Backbone.Mediator.subscribe 'gapi-loaded', @onGPlusAPILoaded, @
+    Backbone.Mediator.subscribe 'auth:gplus-api-loaded', @onGPlusAPILoaded, @
     Backbone.Mediator.subscribe 'router:navigate', @onNavigate, @
 
   routes:
     '': go('HomeView')
-    'items': go('game-menu/InventoryView')
 
     'about': go('AboutView')
 
@@ -32,6 +31,7 @@ module.exports = class CocoRouter extends Backbone.Router
     'admin/files': go('admin/FilesView')
     'admin/level-sessions': go('admin/LevelSessionsView')
     'admin/users': go('admin/UsersView')
+    'admin/base': go('admin/BaseView')
 
     'beta': go('HomeView')
 
@@ -48,9 +48,10 @@ module.exports = class CocoRouter extends Backbone.Router
 
     'db/*path': 'routeToServer'
     'demo(/*subpath)': go('DemoView')
-    'docs/components': go('docs/ComponentDocumentationView')
+    'docs/components': go('docs/ComponentsDocumentationView')
+    'docs/systems': go('docs/SystemsDocumentationView')
 
-    'editor': go('editor/MainEditorView')
+    'editor': go('CommunityView')
 
     'editor/achievement': go('editor/achievement/AchievementSearchView')
     'editor/achievement/:articleID': go('editor/achievement/AchievementEditView')
@@ -65,6 +66,8 @@ module.exports = class CocoRouter extends Backbone.Router
     'employers': go('EmployersView')
 
     'file/*path': 'routeToServer'
+
+    'github/*path': 'routeToServer'
 
     'legal': go('LegalView')
 

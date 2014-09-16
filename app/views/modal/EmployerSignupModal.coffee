@@ -11,8 +11,8 @@ module.exports = class EmployerSignupModal extends ModalView
   closeButton: true
 
   subscriptions:
-    'server-error': 'onServerError'
-    'linkedin-loaded': 'onLinkedInLoaded'
+    'errors:server-error': 'onServerError'
+    'auth:linkedin-api-loaded': 'onLinkedInLoaded'
     'created-user-without-reload': 'createdAccount'
 
   events:
@@ -57,7 +57,7 @@ module.exports = class EmployerSignupModal extends ModalView
   getRenderData: ->
     context = super()
     context.userIsAuthorized = @authorizedWithLinkedIn
-    context.userHasSignedContract = 'employer' in me.get('permissions')
+    context.userHasSignedContract = 'employer' in me.get('permissions', true)
     context.userIsAnonymous = context.me.get('anonymous')
     context.sentMoreInfoEmail = @sentMoreInfoEmail
     context

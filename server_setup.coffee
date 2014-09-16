@@ -13,6 +13,7 @@ logging = require './server/commons/logging'
 config = require './server_config'
 auth = require './server/routes/auth'
 UserHandler = require './server/users/user_handler'
+global.tv4 = require 'tv4' # required for TreemaUtils to work
 
 productionLogging = (tokens, req, res) ->
   status = res.statusCode
@@ -77,7 +78,8 @@ setupRedirectMiddleware = (app) ->
 
 setupTrailingSlashRemovingMiddleware = (app) ->
   app.use (req, res, next) ->
-    return res.redirect 301, req.url[...-1] if req.url.length > 1 and req.url.slice(-1) is '/'
+    # Remove trailing slashes except for in /file/.../ URLs, because those are treated as directory listings.
+    return res.redirect 301, req.url[...-1] if req.url.length > 1 and req.url.slice(-1) is '/' and not /\/file\//.test req.url
     next()
 
 exports.setupMiddleware = (app) ->

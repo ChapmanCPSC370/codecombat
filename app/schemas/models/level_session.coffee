@@ -18,11 +18,14 @@ LevelSessionLevelSchema = c.object {required: ['original', 'majorVersion'], link
   majorVersion:
     type: 'integer'
     minimum: 0
-    default: 0
 
 LevelSessionSchema = c.object
   title: 'Session'
   description: 'A single session for a given level.'
+  default:
+    codeLanguage: 'javascript'
+    submittedCodeLanguage: 'javascript'
+    playtime: 0
 
 _.extend LevelSessionSchema.properties,
   # denormalization
@@ -55,10 +58,13 @@ _.extend LevelSessionSchema.properties,
 
   screenshot:
     type: 'string'
-    
-  heroConfig: c.object {},
-    inventory: c.object()
-    thangType: c.objectId()
+
+  heroConfig: c.object {description: 'Which hero the player is using, equipped with what inventory.'},
+    inventory:
+      type: 'object'
+      description: 'The inventory of the hero: slots to item ThangTypes.'
+      additionalProperties: c.objectId(description: 'An item ThangType.')
+    thangType: c.objectId(links: [{rel: 'db', href: '/db/thang.type/{($)}/version'}], title: 'Thang Type', description: 'The ThangType of the hero.', format: 'thang-type')
 
   state: c.object {},
     complete:
@@ -116,16 +122,14 @@ _.extend LevelSessionSchema.properties,
       type: 'object'
       additionalProperties:
         type: 'string'
-        format: 'javascript'
+        format: 'code'
 
   codeLanguage:
     type: 'string'
-    default: 'javascript'
 
   playtime:
     type: 'number'
     title: 'Playtime'
-    default: 0
     description: 'The total playtime on this session'
 
   teamSpells:
@@ -161,10 +165,10 @@ _.extend LevelSessionSchema.properties,
       type: 'object'
       additionalProperties:
         type: 'string'
+        format: 'code'
 
   submittedCodeLanguage:
     type: 'string'
-    default: 'javascript'
 
   transpiledCode:
     type: 'object'
@@ -172,6 +176,7 @@ _.extend LevelSessionSchema.properties,
       type: 'object'
       additionalProperties:
         type: 'string'
+        format: 'code'
 
   isRanking:
     type: 'boolean'

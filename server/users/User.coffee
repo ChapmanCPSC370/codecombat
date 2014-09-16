@@ -15,14 +15,6 @@ UserSchema = new mongoose.Schema({
     'default': Date.now
 }, {strict: false})
 
-UserSchema.pre('init', (next) ->
-  return next() unless jsonschema.properties?
-  for prop, sch of jsonschema.properties
-    continue if prop is 'emails' # defaults may change, so don't carry them over just yet
-    @set(prop, sch.default) if sch.default?
-  next()
-)
-
 UserSchema.post('init', ->
   @set('anonymous', false) if @get('email')
 )
@@ -132,13 +124,13 @@ UserSchema.statics.statsMapping =
     'level.component': 'stats.levelComponentMiscPatches'
     'level.system': 'stats.levelSystemMiscPatches'
     'thang.type': 'stats.thangTypeMiscPatches'
-    
+
 UserSchema.statics.incrementStat = (id, statName, done, inc=1) ->
   id = mongoose.Types.ObjectId id if _.isString id
   @findById id, (err, user) ->
     log.error err if err?
     err = new Error "Could't find user with id '#{id}'" unless user or err
-    return done err if err?
+    return done() if err?
     user.incrementStat statName, done, inc=1
 
 UserSchema.methods.incrementStat = (statName, done, inc=1) ->
@@ -192,8 +184,9 @@ UserSchema.statics.hashPassword = (password) ->
   shasum.digest('hex')
 
 UserSchema.statics.privateProperties = [
-  'permissions', 'email', 'firstName', 'lastName', 'gender', 'facebookID',
-  'gplusID', 'music', 'volume', 'aceConfig', 'employerAt', 'signedEmployerAgreement'
+  'permissions', 'email', 'mailChimp', 'firstName', 'lastName', 'gender', 'facebookID',
+  'gplusID', 'music', 'volume', 'aceConfig', 'employerAt', 'signedEmployerAgreement',
+  'emailSubscriptions', 'emails', 'activity'
 ]
 UserSchema.statics.jsonSchema = jsonschema
 UserSchema.statics.editableProperties = [

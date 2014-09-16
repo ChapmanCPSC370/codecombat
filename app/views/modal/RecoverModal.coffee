@@ -18,7 +18,7 @@ module.exports = class RecoverModal extends ModalView
     'keydown input': 'recoverAccount'
 
   subscriptions:
-    'server-error': 'onServerError'
+    'errors:server-error': 'onServerError'
 
   onServerError: (e) -> # TODO: work error handling into a separate forms system
     @disableModalInProgress(@$el)
@@ -37,5 +37,5 @@ module.exports = class RecoverModal extends ModalView
 
   successfullyRecovered: =>
     @disableModalInProgress(@$el)
-    @$el.find('.modal-body:visible').text('Recovery email sent.')
+    @$el.find('.modal-body:visible').text($.i18n.t('recover.recovery_sent'))
     @$el.find('.modal-footer').remove()

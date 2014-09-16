@@ -225,9 +225,13 @@ table.table
 .ui-slider-handle
   border: 1px solid black !important
 
-.flag-cursor
-  cursor: crosshair
+// Override jQuery UI widget images that we don't use
+.ui-widget-content, .ui-widget-header, .ui-widget-overlay, .ui-widget-shadow
+  background-image: none
 
+.ui-widget-content, .ui-state-default, .ui-widget-header
+  .ui-state-default, .ui-state-focus, .ui-state-active, .ui-state-highlight, .ui-state-error
+    background-image: none
 
 // Fonts
 
@@ -298,3 +302,11 @@ a[data-toggle="coco-modal"]
   bottom: 0px
   right: 0px
   z-index: 1001
+
+kbd
+  padding: 2px 4px
+  font-size: 90%
+  color: #fff
+  background-color: #333
+  border-radius: 3px
+  @include box-shadow(inset 0 -1px 0 rgba(0, 0, 0, .25))

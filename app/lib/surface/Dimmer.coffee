@@ -2,9 +2,9 @@ CocoClass = require 'lib/CocoClass'
 
 module.exports = class Dimmer extends CocoClass
   subscriptions:
-    'level-disable-controls': 'onDisableControls'
-    'level-enable-controls': 'onEnableControls'
-    'level-highlight-sprites': 'onHighlightSprites'
+    'level:disable-controls': 'onDisableControls'
+    'level:enable-controls': 'onEnableControls'
+    'sprite:highlight-sprites': 'onHighlightSprites'
     'sprite:speech-updated': 'onSpriteSpeechUpdated'
     'surface:frame-changed': 'onFrameChanged'
     'camera:zoom-updated': 'onZoomUpdated'
@@ -26,7 +26,6 @@ module.exports = class Dimmer extends CocoClass
   build: ->
     @dimLayer = new createjs.Container()
     @dimLayer.mouseEnabled = @dimLayer.mouseChildren = false
-    @dimLayer.layerIndex = -10
     @dimLayer.addChild @dimScreen = new createjs.Shape()
     @dimLayer.addChild @dimMask = new createjs.Shape()
     @dimScreen.graphics.beginFill('rgba(0,0,0,0.5)').rect 0, 0, @camera.canvasWidth, @camera.canvasHeight

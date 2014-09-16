@@ -3,9 +3,7 @@ CocoClass = require 'lib/CocoClass'
 LevelLoader = require 'lib/LevelLoader'
 GoalManager = require 'lib/world/GoalManager'
 God = require 'lib/God'
-
-Aether.addGlobal 'Vector', require 'lib/world/vector'
-Aether.addGlobal '_', _
+{createAetherOptions} = require 'lib/aether_utils'
 
 module.exports = class Simulator extends CocoClass
   constructor: (@options) ->
@@ -56,8 +54,8 @@ module.exports = class Simulator extends CocoClass
 
   simulateSingleGame: ->
     return if @destroyed
-    @trigger 'statusUpdate', 'Simulating...'
     @assignWorldAndLevelFromLevelLoaderAndDestroyIt()
+    @trigger 'statusUpdate', 'Simulating...'
     @setupGod()
     try
       @commenceSingleSimulation()
@@ -71,6 +69,7 @@ module.exports = class Simulator extends CocoClass
 
   handleSingleSimulationError: (error) ->
     console.error 'There was an error simulating a single game!', error
+    return if @destroyed
     if @options.headlessClient and @options.simulateOnlyOneGame
       console.log 'GAMERESULT:tie'
       process.exit(0)
@@ -78,12 +77,14 @@ module.exports = class Simulator extends CocoClass
 
   handleSingleSimulationInfiniteLoop: ->
     console.log 'There was an infinite loop in the single game!'
+    return if @destroyed
     if @options.headlessClient and @options.simulateOnlyOneGame
       console.log 'GAMERESULT:tie'
       process.exit(0)
     @cleanupAndSimulateAnotherTask()
 
   processSingleGameResults: (simulationResults) ->
+    return console.error "Weird, we destroyed the Simulator before it processed results?" if @destroyed
     taskResults = @formTaskResultsObject simulationResults
     console.log 'Processing results:', taskResults
     humanSessionRank = taskResults.sessions[0].metrics.rank
@@ -174,14 +175,14 @@ module.exports = class Simulator extends CocoClass
     return if @destroyed
     info = 'All resources loaded, simulating!'
     console.log info
-    @trigger 'statusUpdate', info, @task.getSessions()
     @assignWorldAndLevelFromLevelLoaderAndDestroyIt()
+    @trigger 'statusUpdate', info, @task.getSessions()
     @setupGod()
 
     try
       @commenceSimulationAndSetupCallback()
     catch err
-      console.error 'There was an error in simulation:', err, "-- trying again in #{@retryDelayInSeconds} seconds"
+      console.error 'There was an error in simulation:', err, err.stack, "-- trying again in #{@retryDelayInSeconds} seconds"
       @simulateAnotherTaskAfterDelay()
 
   assignWorldAndLevelFromLevelLoaderAndDestroyIt: ->
@@ -227,11 +228,13 @@ module.exports = class Simulator extends CocoClass
               @hd = new @memwatch.HeapDiff()
 
   onInfiniteLoop: ->
+    return if @destroyed
     console.warn 'Skipping infinitely looping game.'
     @trigger 'statusUpdate', "Infinite loop detected; grabbing a new game in #{@retryDelayInSeconds} seconds."
     _.delay @cleanupAndSimulateAnotherTask, @retryDelayInSeconds * 1000
 
   processResults: (simulationResults) ->
+    return console.error "Weird, we destroyed the Simulator before it processed results?" if @destroyed
     taskResults = @formTaskResultsObject simulationResults
     unless taskResults.taskID
       console.error "*** Error: taskResults has no taskID ***\ntaskResults:", taskResults
@@ -240,7 +243,11 @@ module.exports = class Simulator extends CocoClass
       @sendResultsBackToServer taskResults
 
   sendResultsBackToServer: (results) ->
-    @trigger 'statusUpdate', 'Simulation completed, sending results back to server!'
+    status = 'Recording:'
+    for session in results.sessions
+      states = ['wins', if _.find(results.sessions, (s) -> s.metrics.rank is 0) then 'loses' else 'draws']
+      status += " #{session.name} #{states[session.metrics.rank]}"
+    @trigger 'statusUpdate', status
     console.log 'Sending result back to server:'
     console.log JSON.stringify results
 
@@ -391,23 +398,7 @@ module.exports = class Simulator extends CocoClass
         aether.transpile ''
 
   createAether: (methodName, method, useProtectAPI, codeLanguage) ->
-    aetherOptions =
-      functionName: methodName
-      protectAPI: useProtectAPI
-      includeFlow: false
-      yieldConditionally: methodName is 'plan'
-      globals: ['Vector', '_']
-      problems:
-        jshint_W040: {level: 'ignore'}
-        jshint_W030: {level: 'ignore'}  # aether_NoEffect instead
-        aether_MissingThis: {level: 'error'}
-      #functionParameters: # TODOOOOO
-      executionLimit: 1 * 1000 * 1000
-      language: codeLanguage
-    if methodName is 'hear' then aetherOptions.functionParameters = ['speaker', 'message', 'data']
-    if methodName is 'makeBid' then aetherOptions.functionParameters = ['tileGroupLetter']
-    if methodName is 'findCentroids' then aetherOptions.functionParameters = ['centroids']
-    #console.log 'creating aether with options', aetherOptions
+    aetherOptions = createAetherOptions functionName: methodName, codeLanguage: codeLanguage, skipProtectAPI: not useProtectAPI
     return new Aether aetherOptions
 
 class SimulationTask

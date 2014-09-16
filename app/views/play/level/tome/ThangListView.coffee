@@ -11,7 +11,8 @@ module.exports = class ThangListView extends CocoView
   id: 'thang-list-view'
   template: template
 
-  subscriptions: {}
+  subscriptions:
+    'tome:select-primary-sprite': 'onSelectPrimarySprite'
 
   constructor: (options) ->
     super options
@@ -29,6 +30,8 @@ module.exports = class ThangListView extends CocoView
       false
     ), @sortScoreForThang
     @muggleThangs = _.sortBy _.without(@thangs, @readwriteThangs..., @readThangs...), @sortScoreForThang
+    if @muggleThangs.length > 15
+      @muggleThangs = []  # Don't render a zillion of these. Slow, too long, maybe not useful.
 
   sortScoreForThang: (t) =>
     # Sort by my team, then most spells and fewest shared Thangs per spell,
@@ -73,6 +76,12 @@ module.exports = class ThangListView extends CocoView
     null
 
   adjustThangs: (spells, thangs) ->
+    # TODO: it would be nice to not have to do this any more, like if we migrate to the hero levels.
+    # Recreating all the ThangListEntryViews and their ThangAvatarViews is pretty slow.
+    # So they aren't even kept up-to-date during world streaming.
+    # Updating the existing subviews? Would be kind of complicated to get all the new thangs and spells propagated.
+    # I would do it, if I didn't think we were perhaps soon to not do the ThangList any more.
+    # Will temporary reduce the number of muggle thangs we're willing to draw.
     @spells = @options.spells = spells
     for entry in @entries
       entry.$el.remove()
@@ -80,6 +89,9 @@ module.exports = class ThangListView extends CocoView
     @thangs = @options.thangs = thangs
     @sortThangs()
     @addThangListEntries()
+
+  onSelectPrimarySprite: (e) ->
+    @entries[0]?.select()
 
   destroy: ->
     entry.destroy() for entry in @entries

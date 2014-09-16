@@ -7,6 +7,10 @@ config.ssl_port = process.env.COCO_SSL_PORT or process.env.COCO_SSL_NODE_PORT or
 config.cloudflare =
   token: process.env.COCO_CLOUDFLARE_API_KEY or ''
 
+config.github =
+  client_id: process.env.COCO_GITHUB_CLIENT_ID or 'fd5c9d34eb171131bc87'
+  client_secret: process.env.COCO_GITHUB_CLIENT_SECRET or '2555a86b83f850bc44a98c67c472adb2316a3f05'
+
 config.mongo =
   port: process.env.COCO_MONGO_PORT or 27017
   host: process.env.COCO_MONGO_HOST or 'localhost'
@@ -36,6 +40,8 @@ config.mail =
   delightedAPIKey: process.env.COCO_DELIGHTED_API_KEY or ''
   cronHandlerPublicIP: process.env.COCO_CRON_PUBLIC_IP or ''
   cronHandlerPrivateIP: process.env.COCO_CRON_PRIVATE_IP or ''
+
+config.hipchatAPIKey = process.env.COCO_HIPCHAT_API_KEY or ''
 
 config.queue =
   accessKeyId: process.env.COCO_AWS_ACCESS_KEY_ID or ''

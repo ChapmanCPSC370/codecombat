@@ -1,5 +1,4 @@
 IndieSprite = require 'lib/surface/IndieSprite'
-Camera = require './Camera'
 {me} = require 'lib/auth'
 
 module.exports = class WizardSprite extends IndieSprite
@@ -17,10 +16,9 @@ module.exports = class WizardSprite extends IndieSprite
 
   subscriptions:
     'bus:player-states-changed': 'onPlayerStatesChanged'
-    'me:synced': 'onMeSynced'
+    'auth:me-synced': 'onMeSynced'
     'surface:sprite-selected': 'onSpriteSelected'
-    'echo-self-wizard-sprite': 'onEchoSelfWizardSprite'
-    'echo-all-wizard-sprites': 'onEchoAllWizardSprites'
+    'sprite:echo-all-wizard-sprites': 'onEchoAllWizardSprites'
 
   shortcuts:
     'up': 'onMoveKey'
@@ -35,12 +33,12 @@ module.exports = class WizardSprite extends IndieSprite
     @targetPos = @thang.pos
     if @isSelf
       @setNameLabel me.displayName()
-      @setColorHue me.get('wizardColor1')
     else if options.name
       @setNameLabel options.name
+    Backbone.Mediator.publish 'self-wizard:created', sprite: @
 
-  makeIndieThang: (thangType, thangID, pos) ->
-    thang = super thangType, thangID, pos
+  makeIndieThang: (thangType, options) ->
+    thang = super thangType, options
     thang.isSelectable = false
     thang.bobHeight = 0.75
     thang.bobTime = 2
@@ -59,6 +57,11 @@ module.exports = class WizardSprite extends IndieSprite
       name += " (#{@options.codeLanguage})"  # TODO: move on second line, capitalize properly
     super name
 
+  toggle: (to) ->
+    @imageObject?.visible = to
+    label[if to then 'show' else 'hide']() for name, label of @labels
+    mark.mark?.visible = to for name, mark of @marks
+
   onPlayerStatesChanged: (e) ->
     for playerID, state of e.states
       continue unless playerID is @thang.id
@@ -66,7 +69,6 @@ module.exports = class WizardSprite extends IndieSprite
       continue if playerID is me.id  # ignore changes for self wizard sprite
       @setNameLabel state.name
       continue unless state.wizard?
-      @setColorHue state.wizard.wizardColor1
       if targetID = state.wizard.targetSprite
         return console.warn 'Wizard Sprite couldn\'t find target sprite', targetID unless targetID of @options.sprites
         @setTarget @options.sprites[targetID]
@@ -80,8 +82,8 @@ module.exports = class WizardSprite extends IndieSprite
     shouldUpdate = not _.isEqual(newColorConfig, @options.colorConfig)
     @options.colorConfig = $.extend(true, {}, newColorConfig)
     if shouldUpdate
-      @setupSprite()
-      @playAction(@currentAction)
+      @setUpSprite()
+      @playAction(@currentAction) if @currentAction
 
   onSpriteSelected: (e) ->
     return unless @isSelf
@@ -91,17 +93,13 @@ module.exports = class WizardSprite extends IndieSprite
     @imageObject.scaleX = @imageObject.scaleY = @imageObject.alpha = 0
     createjs.Tween.get(@imageObject)
       .to({scaleX: 1, scaleY: 1, alpha: 1}, 1000, createjs.Ease.getPowInOut(2.2))
+    @labels.name?.show()
 
   animateOut: (callback) ->
     tween = createjs.Tween.get(@imageObject)
       .to({scaleX: 0, scaleY: 0, alpha: 0}, 1000, createjs.Ease.getPowInOut(2.2))
     tween.call(callback) if callback
-
-  setColorHue: (newColorHue) ->
-    # TODO: is this needed any more?
-    return if @colorHue is newColorHue
-    @colorHue = newColorHue
-    #@updateColorFilters()
+    @labels.name?.hide()
 
   setEditing: (@editing) ->
     if @editing
@@ -114,7 +112,6 @@ module.exports = class WizardSprite extends IndieSprite
     @targetPos = @getPosFromTarget(@targetSprite or targetPos)
     @endMoveTween()
 
-  onEchoSelfWizardSprite: (e) -> e.payload = @ if @isSelf
   onEchoAllWizardSprites: (e) -> e.payload.push @
   defaultPos: -> x: 35, y: 24, z: @thang.depth / 2 + @thang.bobHeight
   move: (pos, duration) -> @setTarget(pos, duration)
@@ -134,7 +131,7 @@ module.exports = class WizardSprite extends IndieSprite
     @targetPos = @boundWizard targetPos
     @beginMoveTween(duration, isLinear)
     @shoveOtherWizards()
-    Backbone.Mediator.publish('self-wizard:target-changed', {sender: @}) if @isSelf
+    Backbone.Mediator.publish('self-wizard:target-changed', {sprite: @}) if @isSelf
 
   boundWizard: (target) ->
     # Passed an {x, y} in world coordinates, returns {x, y} within world bounds
@@ -181,7 +178,7 @@ module.exports = class WizardSprite extends IndieSprite
   shoveOtherWizards: (removeMe) ->
     return unless @targetSprite
     allWizards = []
-    Backbone.Mediator.publish('echo-all-wizard-sprites', {payload: allWizards})
+    Backbone.Mediator.publish 'sprite:echo-all-wizard-sprites', payload: allWizards
     allOfUs = (wizard for wizard in allWizards when wizard.targetSprite is @targetSprite)
     allOfUs = (wizard for wizard in allOfUs when wizard isnt @) if removeMe
 
@@ -202,14 +199,15 @@ module.exports = class WizardSprite extends IndieSprite
       wizard.beginMoveTween()
 
   endMoveTween: =>
+    return if @destroyed
     @thang.action = if @editing then 'cast' else 'idle'
     @thang.actionActivated = @thang.action is 'cast'
     @reachedTarget = true
     @faceTarget()
     @update true
 
-  updatePosition: ->
-    return unless @options.camera
+  updatePosition: (whileLoading=false) ->
+    return if whileLoading or not @options.camera
     @thang.pos = @getCurrentPosition()
     @faceTarget()
     sup = @options.camera.worldToSurface x: @thang.pos.x, y: @thang.pos.y, z: @thang.pos.z - @thang.depth / 2
@@ -273,4 +271,4 @@ module.exports = class WizardSprite extends IndieSprite
     position = {x: @targetPos.x + x, y: @targetPos.y + y}
     @setTarget(position, interval, true)
     @updatePosition()
-    Backbone.Mediator.publish 'camera-zoom-to', position, interval
+    Backbone.Mediator.publish 'camera:zoom-to', pos: position, duration: interval

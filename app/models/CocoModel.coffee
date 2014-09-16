@@ -9,21 +9,27 @@ class CocoModel extends Backbone.Model
   notyErrors: true
   @schema: null
 
-  getMe: -> @me or @me = require('lib/auth').me
-
   initialize: (attributes, options) ->
     super(arguments...)
     options ?= {}
     @setProjection options.project
     if not @constructor.className
       console.error("#{@} needs a className set.")
-    @addSchemaDefaults()
     @on 'sync', @onLoaded, @
     @on 'error', @onError, @
     @on 'add', @onLoaded, @
     @saveBackup = _.debounce(@saveBackup, 500)
-    
-  setProjection: (@project) ->
+
+  setProjection: (project) ->
+    return if project is @project
+    url = @getURL()
+    url += '&project=' unless /project=/.test url
+    url = url.replace '&', '?' unless /\?/.test url
+    url = url.replace /project=[^&]*/, "project=#{project?.join(',') or ''}"
+    url = url.replace /[&?]project=&/, '&' unless project?.length
+    url = url.replace /[&?]project=$/, '' unless project?.length
+    @setURL url
+    @project = project
 
   type: ->
     @constructor.className
@@ -46,12 +52,32 @@ class CocoModel extends Backbone.Model
 
   getNormalizedURL: -> "#{@urlRoot}/#{@id}"
 
-  set: ->
+  attributesWithDefaults: undefined
+
+  get: (attribute, withDefault=false) ->
+    if withDefault
+      if @attributesWithDefaults is undefined then @buildAttributesWithDefaults()
+      return @attributesWithDefaults[attribute]
+    else
+      super(attribute)
+
+  set: (attributes, options) ->
+    delete @attributesWithDefaults
     inFlux = @loading or not @loaded
-    @markToRevert() unless inFlux or @_revertAttributes
-    res = super(arguments...)
+    @markToRevert() unless inFlux or @_revertAttributes or @project or options?.fromMerge
+    res = super attributes, options
     @saveBackup() if @saveBackups and (not inFlux) and @hasLocalChanges()
     res
+
+  buildAttributesWithDefaults: ->
+    t0 = new Date()
+    clone = $.extend true, {}, @attributes
+    thisTV4 = tv4.freshApi()
+    thisTV4.addSchema('#', @schema())
+    thisTV4.addSchema('metaschema', require('schemas/metaschema'))
+    TreemaNode.utils.populateDefaults(clone, @schema(), thisTV4)
+    @attributesWithDefaults = clone
+    console.debug "Populated defaults for #{@attributes.name or @type()} in #{new Date() - t0}ms"
 
   loadFromBackup: ->
     return unless @saveBackups
@@ -61,7 +87,7 @@ class CocoModel extends Backbone.Model
       CocoModel.backedUp[@id] = @
 
   saveBackup: -> @saveBackupNow()
-    
+
   saveBackupNow: ->
     storage.save(@id, @attributes)
     CocoModel.backedUp[@id] = @
@@ -70,7 +96,9 @@ class CocoModel extends Backbone.Model
   schema: -> return @constructor.schema
 
   getValidationErrors: ->
-    errors = tv4.validateMultiple(@attributes, @constructor.schema or {}).errors
+    # Since Backbone unset only sets things to undefined instead of deleting them, we ignore undefined properties.
+    definedAttributes = _.pick @attributes, (v) -> v isnt undefined
+    errors = tv4.validateMultiple(definedAttributes, @constructor.schema or {}).errors
     return errors if errors?.length
 
   validate: ->
@@ -84,7 +112,7 @@ class CocoModel extends Backbone.Model
   save: (attrs, options) ->
     options ?= {}
     options.headers ?= {}
-    options.headers['X-Current-Path'] = document.location.pathname
+    options.headers['X-Current-Path'] = document.location?.pathname ? 'unknown'
     success = options.success
     error = options.error
     options.success = (model, res) =>
@@ -128,11 +156,15 @@ class CocoModel extends Backbone.Model
 
   markToRevert: ->
     if @type() is 'ThangType'
-      @_revertAttributes = _.clone @attributes  # No deep clones for these!
+      # Don't deep clone the raw vector data, but do deep clone everything else.
+      @_revertAttributes = _.clone @attributes
+      for smallProp, value of @attributes when value and smallProp isnt 'raw'
+        @_revertAttributes[smallProp] = _.cloneDeep value
     else
       @_revertAttributes = $.extend(true, {}, @attributes)
 
   revert: ->
+    @clear({silent: true})
     @set(@_revertAttributes, {silent: true}) if @_revertAttributes
     @clearBackup()
 
@@ -153,55 +185,40 @@ class CocoModel extends Backbone.Model
     clone
 
   isPublished: ->
-    for permission in @get('permissions') or []
+    for permission in (@get('permissions', true) ? [])
       return true if permission.target is 'public' and permission.access is 'read'
     false
 
   publish: ->
     if @isPublished() then throw new Error('Can\'t publish what\'s already-published. Can\'t kill what\'s already dead.')
-    @set 'permissions', (@get('permissions') or []).concat({access: 'read', target: 'public'})
-
-  addSchemaDefaults: ->
-    return if @addedSchemaDefaults
-    @addedSchemaDefaults = true
-    for prop, defaultValue of @constructor.schema.default or {}
-      continue if @get(prop)?
-      #console.log 'setting', prop, 'to', defaultValue, 'from attributes.default'
-      @set prop, defaultValue
-    for prop, sch of @constructor.schema.properties or {}
-      continue if @get(prop)?
-      continue if prop is 'emails' # hack, defaults are handled through User.coffee's email-specific methods.
-      #console.log 'setting', prop, 'to', sch.default, 'from sch.default' if sch.default?
-      @set prop, sch.default if sch.default?
-    if @loaded
-      @loadFromBackup()
+    @set 'permissions', @get('permissions', true).concat({access: 'read', target: 'public'})
 
   @isObjectID: (s) ->
     s.length is 24 and s.match(/[a-f0-9]/gi)?.length is 24
 
   hasReadAccess: (actor) ->
     # actor is a User object
-
-    actor ?= @getMe()
+    actor ?= me
     return true if actor.isAdmin()
-    if @get('permissions')?
-      for permission in @get('permissions')
-        if permission.target is 'public' or actor.get('_id') is permission.target
-          return true if permission.access in ['owner', 'read']
+    for permission in (@get('permissions', true) ? [])
+      if permission.target is 'public' or actor.get('_id') is permission.target
+        return true if permission.access in ['owner', 'read']
 
     return false
 
   hasWriteAccess: (actor) ->
     # actor is a User object
-
-    actor ?= @getMe()
+    actor ?= me
     return true if actor.isAdmin()
-    if @get('permissions')?
-      for permission in @get('permissions')
-        if permission.target is 'public' or actor.get('_id') is permission.target
-          return true if permission.access in ['owner', 'write']
+    for permission in (@get('permissions', true) ? [])
+      if permission.target is 'public' or actor.get('_id') is permission.target
+        return true if permission.access in ['owner', 'write']
 
     return false
+
+  getOwner: ->
+    ownerPermission = _.find @get('permissions', true), access: 'owner'
+    ownerPermission?.target
 
   getDelta: ->
     differ = deltasLib.makeJSONDiffer()
@@ -220,7 +237,7 @@ class CocoModel extends Backbone.Model
       return false
     for key, value of newAttributes
       delete newAttributes[key] if _.isEqual value, @attributes[key]
-      
+
     @set newAttributes
     return true
 
@@ -303,7 +320,7 @@ class CocoModel extends Backbone.Model
     achievements = new NewAchievementCollection
     achievements.fetch
       success: (collection) ->
-        me.fetch (success: -> Backbone.Mediator.publish('achievements:new', collection)) unless _.isEmpty(collection.models)
+        me.fetch (success: -> Backbone.Mediator.publish('achievements:new', earnedAchievements: collection)) unless _.isEmpty(collection.models)
       error: ->
         console.error 'Miserably failed to fetch unnotified achievements', arguments
 

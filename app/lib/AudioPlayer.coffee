@@ -33,7 +33,7 @@ class Media
 
 class AudioPlayer extends CocoClass
   subscriptions:
-    'play-sound': (e) -> @playInterfaceSound e.trigger, e.volume
+    'audio-player:play-sound': (e) -> @playInterfaceSound e.trigger, e.volume
 
   constructor: () ->
     super()
@@ -81,20 +81,31 @@ class AudioPlayer extends CocoClass
 
   playInterfaceSound: (name, volume=1) ->
     filename = "/file/interface/#{name}#{@ext}"
-    if filename of cache and createjs.Sound.loadComplete filename
+    if @hasLoadedSound filename
       @playSound name, volume
     else
       @preloadInterfaceSounds [name] unless filename of cache
       @soundsToPlayWhenLoaded[name] = volume
 
   playSound: (name, volume=1, delay=0, pos=null) ->
-    audioOptions = {volume: (me.get('volume') ? 1) * volume, delay: delay}
-    unless @camera is null or pos is null
-      audioOptions = @applyPanning audioOptions, pos
+    return console.error 'Trying to play empty sound?' unless name
+    audioOptions = {volume: volume, delay: delay}
+    filename = if _.string.startsWith(name, '/file/') then name else '/file/' + name
+    unless @hasLoadedSound filename
+      @soundsToPlayWhenLoaded[name] = audioOptions.volume
+    audioOptions = @applyPanning audioOptions, pos if @camera and pos
     instance = createjs.Sound.play name, audioOptions
+    # For some reason, individual sound volume control doesn't work any more.
+    # I tried updating to SoundJS NEXT on 2014-09-10, but couldn't get any sounds to play with that one.
+    #console.log 'got instance with volume', instance.volume, instance._volume, instance.gainNode?.gain.value
     instance
 
-#  # TODO: load Interface sounds somehow, somewhere, somewhen
+  hasLoadedSound: (filename, name) ->
+    return false unless filename of cache
+    return false unless createjs.Sound.loadComplete filename
+    true
+
+  # TODO: load Interface sounds somehow, somewhere, somewhen
 
   preloadSoundReference: (sound) ->
     name = @nameForSoundReference sound

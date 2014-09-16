@@ -18,7 +18,7 @@ module.exports = class LevelLoadingView extends CocoView
     @shownReady = true
     ready = $.i18n.t('play_level.loading_ready', defaultValue: 'Ready!')
     @$el.find('#tip-wrapper .tip').addClass('ready').text ready
-    Backbone.Mediator.publish 'play-sound', trigger: 'level_loaded', volume: 0.75  # old: loading_ready
+    Backbone.Mediator.publish 'audio-player:play-sound', trigger: 'level_loaded', volume: 0.75  # old: loading_ready
 
   unveil: ->
     _.delay @reallyUnveil, 1000
@@ -31,6 +31,7 @@ module.exports = class LevelLoadingView extends CocoView
     loadingDetails.css 'top', -loadingDetails.outerHeight(true)
     @$el.find('.left-wing').css left: '-100%', backgroundPosition: 'right -400px top 0'
     @$el.find('.right-wing').css right: '-100%', backgroundPosition: 'left -400px top 0'
+    Backbone.Mediator.publish 'audio-player:play-sound', trigger: 'loading-view-unveil', volume: 0.5
     _.delay @onUnveilEnded, duration * 1000
 
   onUnveilEnded: =>

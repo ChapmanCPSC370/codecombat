@@ -14,12 +14,13 @@ module.exports = class AuthModal extends ModalView
     # login buttons
     'click #switch-to-signup-button': 'onSignupInstead'
     'click #signup-confirm-age': 'checkAge'
+    'click #github-login-button': 'onGitHubLoginClicked'
     'submit': 'onSubmitForm' # handles both submit buttons
     'keyup #name': 'onNameChange'
 
   subscriptions:
-    'server-error': 'onServerError'
-    'logging-in-with-facebook': 'onLoggingInWithFacebook'
+    'errors:server-error': 'onServerError'
+    'auth:logging-in-with-facebook': 'onLoggingInWithFacebook'
 
   constructor: (options) ->
     @onNameChange = _.debounce @checkNameExists, 500
@@ -38,7 +39,7 @@ module.exports = class AuthModal extends ModalView
     c.onEmployersPage = Backbone.history.fragment is "employers"
     c.me = me
     c
-    
+
   afterInsert: ->
     super()
     _.delay application.router.renderLoginButtons, 500
@@ -74,7 +75,7 @@ module.exports = class AuthModal extends ModalView
     userObject.name = @suggestedName if @suggestedName
     for key, val of me.attributes when key in ['preferredLanguage', 'testGroupNumber', 'dateCreated', 'wizardColor1', 'name', 'music', 'volume', 'emails']
       userObject[key] ?= val
-    subscribe = @$el.find('#signup-subscribe').prop('checked')
+    subscribe = @$el.find('#subscribe').prop('checked')
     userObject.emails ?= {}
     userObject.emails.generalNews ?= {}
     userObject.emails.generalNews.enabled = subscribe
@@ -101,3 +102,6 @@ module.exports = class AuthModal extends ModalView
       else
         @suggestedName = newName
         forms.setErrorToProperty @$el, 'name', "That name is taken! How about #{newName}?", true
+
+  onGitHubLoginClicked: ->
+    Backbone.Mediator.publish 'auth:log-in-with-github', {}

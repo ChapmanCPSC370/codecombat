@@ -3,13 +3,14 @@ AudioPlayer = require 'lib/AudioPlayer'
 {me} = require 'lib/auth'
 
 CROSSFADE_LENGTH = 1500
+MUSIC_VOLUME = 0.6
 
 module.exports = class MusicPlayer extends CocoClass
   currentMusic: null
   standingBy: null
 
   subscriptions:
-    'level-play-music': 'onPlayMusic'
+    'music-player:play-music': 'onPlayMusic'
     'audio-player:loaded': 'onAudioLoaded'
 
   constructor: ->
@@ -51,7 +52,7 @@ module.exports = class MusicPlayer extends CocoClass
     return unless @currentMusic
     @currentMusic.volume = 0.0
     if me.get('music')
-      createjs.Tween.get(@currentMusic).to({volume: 1.0}, CROSSFADE_LENGTH)
+      createjs.Tween.get(@currentMusic).to({volume: MUSIC_VOLUME}, CROSSFADE_LENGTH)
 
   onMusicSettingChanged: ->
     @updateMusicVolume()
@@ -59,7 +60,7 @@ module.exports = class MusicPlayer extends CocoClass
   updateMusicVolume: ->
     return unless @currentMusic
     createjs.Tween.removeTweens(@currentMusic)
-    @currentMusic.volume = if me.get('music') then 1.0 else 0.0
+    @currentMusic.volume = if me.get('music') then MUSIC_VOLUME else 0.0
 
   destroy: ->
     me.off 'change:music', @onMusicSettingChanged, @
